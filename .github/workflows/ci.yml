@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    name: Python (lint + unit)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: pynote
+          POSTGRES_PASSWORD: pynote_dev_password
+          POSTGRES_DB: pynote_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pynote -d pynote_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pipx install uv
+      - name: Install workspace
+        run: |
+          uv sync
+          uv pip install -e packages/core -e apps/api -e apps/worker
+      - name: Ruff
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Mypy (core)
+        run: uv run mypy packages/core/src
+      - name: Pytest
+        env:
+          DATABASE_URL: postgresql+psycopg://pynote:pynote_dev_password@localhost:5432/pynote_test
+          REDIS_URL: redis://localhost:6379/0
+          PROVIDER_TIER: free
+        run: uv run pytest -q
+
+  web:
+    name: Web (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - name: Build
+        env:
+          # Build-time placeholders so Clerk init doesn't crash CI.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
+          CLERK_SECRET_KEY: sk_test_placeholder
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: pnpm build

@@ -1,0 +1,76 @@
+[project]
+name = "pynote"
+version = "0.1.0"
+description = "PyNote — a NotebookLM-style RAG application"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "PyNote contributors" }]
+
+# This root project is a workspace umbrella; runtime deps live in apps/* and packages/*.
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=5.0",
+  "httpx>=0.27",
+  "pre-commit>=4.0",
+  "types-requests",
+]
+
+[tool.uv.workspace]
+members = ["apps/api", "apps/worker", "packages/core"]
+
+[tool.uv.sources]
+pynote-core = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions", ".venv"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort
+  "B",   # flake8-bugbear
+  "UP",  # pyupgrade
+  "SIM", # flake8-simplify
+  "RUF", # ruff-specific
+  "TID", # tidy imports
+  "TCH", # type-checking blocks
+]
+ignore = ["E501"]  # line length handled by formatter
+
+# FastAPI uses callable defaults (Depends, Query, Header, etc.) as the idiomatic pattern.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.Header",
+  "fastapi.Query",
+  "fastapi.Path",
+  "fastapi.Body",
+  "fastapi.Cookie",
+  "fastapi.Form",
+  "fastapi.File",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pynote_core", "pynote_api", "pynote_worker"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+exclude = ["alembic/versions"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["apps", "packages", "tests"]
+pythonpath = ["packages/core/src", "apps/api/src", "apps/worker/src"]
+addopts = "-ra --strict-markers"

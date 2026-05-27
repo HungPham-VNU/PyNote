@@ -1,0 +1,26 @@
+# Multi-process dev runner. Install: https://github.com/pvolok/mprocs
+# Usage: `just dev`  (or `mprocs` directly)
+#
+# Each process gets its own log pane. Ctrl-A then a digit jumps panes.
+# `q` quits all. Restart a single one with `r`.
+
+procs:
+  services:
+    shell: docker compose -f docker-compose.dev.yml up
+    autostart: true
+
+  api:
+    shell: uv run uvicorn pynote_api.main:app --reload --port 8000
+    autostart: true
+
+  worker:
+    shell: uv run arq pynote_worker.main.WorkerSettings
+    autostart: true
+
+  web:
+    shell: pnpm dev
+    cwd: apps/web
+    autostart: true
+
+# Run pre-checks (env file + venv) on launch.
+hide_keymap_window: false

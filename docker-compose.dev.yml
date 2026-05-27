@@ -1,0 +1,81 @@
+# Local development services for PyNote.
+# Production deployments swap these for managed services (Supabase/Neon, Upstash, R2).
+# Start:  docker compose -f docker-compose.dev.yml up -d
+# Stop:   docker compose -f docker-compose.dev.yml down
+# Reset:  docker compose -f docker-compose.dev.yml down -v
+
+name: pynote-dev
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: pynote-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pynote}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pynote_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-pynote}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pynote} -d ${POSTGRES_DB:-pynote}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pynote-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: pynote-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-pynote}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-pynote_dev_password}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: create the default bucket on first boot.
+  minio-init:
+    image: minio/mc:latest
+    container_name: pynote-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY_ID:-pynote} ${S3_SECRET_ACCESS_KEY:-pynote_dev_password};
+      mc mb -p local/${S3_BUCKET:-pynote-sources} || true;
+      mc anonymous set download local/${S3_BUCKET:-pynote-sources} || true;
+      echo 'bucket ready';
+      "
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

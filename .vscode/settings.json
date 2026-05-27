@@ -1,0 +1,35 @@
+{
+  // Point VS Code at the uv-managed project venv, NOT the broken D:\python.exe.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+
+  // The "Python Environments" extension (ms-python.vscode-python-envs):
+  // use uv for package ops instead of `python -m pip` (which fails on the broken interpreter).
+  "python-envs.alwaysUseUv": true,
+  "python-envs.defaultEnvManager": "ms-python.python:venv",
+
+  // Help Pylance resolve the src-layout packages.
+  "python.analysis.extraPaths": [
+    "packages/core/src",
+    "apps/api/src",
+    "apps/worker/src"
+  ],
+  "python.analysis.typeCheckingMode": "basic",
+
+  // Ruff is our formatter + linter.
+  "ruff.nativeServer": "on",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true
+  }
+}

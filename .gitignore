@@ -1,0 +1,57 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.tox/
+htmlcov/
+.coverage
+coverage.xml
+
+# uv
+.uv/
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+*.tsbuildinfo
+.next-env.d.ts
+
+# ---- Env / Secrets ----
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---- IDE / OS ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# ---- Local data ----
+data/
+.minio/
+.postgres/
+.redis/
+tmp/
+*.sqlite3
+*.sqlite3-journal
+
+# ---- Build artifacts ----
+*.log
+build/
+target/
+
+# ---- LangSmith local cache (if any) ----
+.langchain/
+.langsmith/

@@ -7,6 +7,8 @@
 
 ## 0. Locked-in decisions
 
+> **Provider / pricing**: see [COSTS.md](COSTS.md). For the university-project free-tier configuration, providers in the table below are swapped (e.g., Claude via GitHub Models, Gemini for cheap ops, BGE-M3 local embeddings) but the architecture is unchanged.
+
 | Area | Choice | Rationale |
 |---|---|---|
 | Deployment | Multi-user cloud-deployable web service | User-chosen |
