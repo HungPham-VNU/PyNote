@@ -59,7 +59,13 @@ def _verify_clerk_jwt(token: str, settings: Settings) -> Principal:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid token: {e}") from e
 
     user_id = claims.get("sub")
+    # Clerk v2 session tokens nest the active org under `o.id`; older/templated
+    # tokens expose `org_id` at the top level. Accept either.
     org_id = claims.get("org_id")
+    if not org_id:
+        org_claim = claims.get("o")
+        if isinstance(org_claim, dict):
+            org_id = org_claim.get("id")
     if not user_id or not org_id:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,

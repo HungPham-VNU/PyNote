@@ -172,8 +172,9 @@
 1. Add `chunk` table with `embedding vector(1024)`, `tsv tsvector`, `parent_chunk_id`.
 2. Implement `HierarchicalChunker` in `packages/core`:
    - Level 1 (section): split on Docling-detected headings; if missing, fall back to ~1500-token windows.
-   - Level 0 (fine): 300-token windows with 50-token overlap inside each L1.
+   - Level 0 (fine): **300-token windows with 50-token overlap inside each L1.** (Reference checkpoint — `rag_skill` uses 1000/200 word for prose chatbots; ours are tighter because reranker is doing the heavy lifting. Revisit in M3 tuning.)
    - Both levels persist `(char_start, char_end)` against `source_part.text` (post-caption-append). **This is the citation contract — write a property test.**
+   - Chunk metadata persisted as `chunk.meta_jsonb`: `{source_title, page, section_path, ordinal_in_section}` so retrieved hits carry display info without joins.
 3. arq job `embed_source(source_id)`:
    - Batch L0 chunks 128 at a time to `voyage-3-large`.
    - Populate `embedding`.
@@ -210,10 +211,17 @@
    - Pack top-8 as Anthropic `search_result` content blocks (one per chunk).
    - Call `ChatAnthropic(model="claude-sonnet-4-6")` with `citations.enabled=True`.
    - Parse response: assert every text block with a citation maps `(search_result_index, start_char_index, end_char_index)` back to a known chunk and a substring of `chunk.text`.
-2. Run against 5 representative PDFs (academic, legal, technical, narrative, marketing). Hand-grade 10 questions each.
-3. Tune: top-K (try 6/8/12), reranker `top_k`, ensemble weights. Record results in `eval/notes/m3-tuning.md`.
+2. **Adopt the 5-case smoke shape** as the prototype's test matrix — same five cases re-used in M7's golden harness:
+   1. **Health** — every provider (Postgres, Voyage, Anthropic, optional Gemini fallback) reachable.
+   2. **Basic Q** — single-turn grounded question, cites at least one source.
+   3. **Context-aware follow-up** — second turn references the first; citation may switch sources.
+   4. **Selection-context** — caller passes `selected_text` from a source span ("explain this"); answer demonstrably grounds in or near it.
+   5. **Session persistence** — re-load the same thread, verify history and citations round-trip from `PostgresSaver`.
+3. Run against 5 representative PDFs (academic, legal, technical, narrative, marketing). Hand-grade 10 questions each.
+4. Tune: top-K (try 6/8/12), reranker `top_k`, ensemble weights. Record results in `eval/notes/m3-tuning.md`.
 
 **Acceptance**
+- [ ] All 5 smoke cases pass on the prototype.
 - [ ] On 50 questions across 5 PDFs, ≥ 90% of citations resolve to a valid chunk substring.
 - [ ] Citation map handles edge cases: multi-sentence citations, no-citation answers, refusals.
 - [ ] Tuning notes capture chosen hyperparameters for M4.
@@ -231,20 +239,26 @@
 1. Implement `chat_graph` per architecture sketch in M3 plan:
    - Nodes: `classify` (Haiku) → `rewrite` (Haiku) → `retrieve` → `pack` → `generate` (Sonnet, streaming) → `map_citations`.
    - State persisted via `PostgresSaver` (reuses our Postgres).
-2. `POST /notebooks/{id}/chat` accepts `{thread_id, message}`. Streams via SSE using `chat_graph.astream(stream_mode="messages")`.
+2. `POST /notebooks/{id}/chat` accepts `{thread_id, message, selected_text?}`.
+   - When `selected_text` is present, prepend it to the rewrite node's prompt: *"User has selected this passage from a source: «…». Their question: …"*. The pack node prioritizes the source containing the selection (boost its RRF score).
+   - Streams via SSE using `chat_graph.astream(stream_mode="messages")`.
 3. Map citations: for each returned `char_location` citation, look up the originating chunk → resolve to `(source_id, source_part_id, char_start, char_end)`. Persist on `message.citations_jsonb`.
-4. Next.js chat panel: streaming markdown renderer (`react-markdown` + custom citation pill component).
-5. `message` table: `(notebook_id, thread_id, role, content, citations_jsonb, created_at)`. Thread is just a UUID — no separate `thread` table yet.
+4. **`GET /notebooks/{id}/threads/{thread_id}/history`** — returns ordered messages with citations. Reads from `PostgresSaver`'s thread state (single source of truth — don't dual-write a `message` table).
+5. Next.js chat panel:
+   - Streaming markdown renderer (`react-markdown` + custom citation pill component).
+   - **Selection-context banner**: when the user selects text inside the source viewer, show a yellow "Use as context for next question" chip; sending the message attaches the selection to the request and clears it.
 6. Empty/error states: source not ready, no chunks, retrieval timeout, model error.
 
 **Acceptance**
 - [ ] User asks a question; tokens stream; citation pills appear inline; clicking a pill shows the cited text in a side panel (no PDF jump yet).
-- [ ] Conversation history persists across reloads (PostgresSaver thread state).
-- [ ] LangSmith shows the full graph trace per turn.
+- [ ] Selecting text in the source viewer surfaces the selection banner; the next answer is demonstrably scoped toward that selection.
+- [ ] `GET /threads/{id}/history` returns the same messages the UI shows after a reload.
+- [ ] LangSmith shows the full graph trace per turn (including `selected_text` in the rewrite span).
 
 **Risks**
 - Citation map fragility — covered by M3 hardening.
 - Streaming + state checkpoint interactions — write an integration test.
+- Selection-context can over-bias retrieval; cap the boost so out-of-selection sources still surface when relevant.
 
 ---
 

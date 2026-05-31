@@ -85,16 +85,22 @@ uv run alembic upgrade head
 ```
 
 ### 5. Run api + worker + web
-Three terminals (or use a Procfile runner like `honcho`):
-```powershell
+
+Easiest — one terminal with `just dev` (needs `mprocs`), or `just up && just api` / `just worker` / `just web` in three terminals.
+
+Raw commands if you don't want the runner:
+```bash
 # Terminal 1 — API
-uv run uvicorn pynote_api.main:app --reload --port 8000
+#   Do NOT use `uvicorn pynote_api.main:app` directly on Windows: psycopg3 async
+#   requires WindowsSelectorEventLoopPolicy, which must be installed BEFORE
+#   uvicorn loads. The module entrypoint sets it first.
+uv run python -m pynote_api
 
 # Terminal 2 — Worker
 uv run arq pynote_worker.main.WorkerSettings
 
 # Terminal 3 — Web
-cd apps/web; pnpm dev
+cd apps/web && pnpm dev
 ```
 
 Visit http://localhost:3000.

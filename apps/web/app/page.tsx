@@ -7,7 +7,7 @@ export default function Home() {
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">PyNote</h1>
         <SignedIn>
-          <UserButton afterSignOutUrl="/" />
+          <UserButton />
         </SignedIn>
       </header>
 

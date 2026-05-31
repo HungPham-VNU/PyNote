@@ -11,3 +11,10 @@ os.environ.setdefault(
     "postgresql+psycopg://pynote:pynote_dev_password@localhost:5432/pynote_test",
 )
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/1")
+
+# Force-clear Clerk config so tests use dev-header auth regardless of what's in
+# the developer's .env. Use a hard set (not setdefault) so a developer who has
+# CLERK_JWKS_URL populated locally still gets predictable test behavior.
+os.environ["CLERK_JWKS_URL"] = ""
+os.environ["CLERK_PUBLISHABLE_KEY"] = ""
+os.environ["CLERK_SECRET_KEY"] = ""

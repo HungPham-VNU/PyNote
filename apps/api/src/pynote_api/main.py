@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from pynote_api.routes import health, jobs, notebooks
+from pynote_api.routes import health, jobs, notebooks, search, sources
 from pynote_core.settings import get_settings
 from pynote_core.tracing import configure_tracing
 
@@ -49,6 +49,8 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(notebooks.router, prefix="/api/v1")
+    app.include_router(sources.router, prefix="/api/v1")
+    app.include_router(search.router, prefix="/api/v1")
     app.include_router(jobs.router, prefix="/api/v1")
 
     return app

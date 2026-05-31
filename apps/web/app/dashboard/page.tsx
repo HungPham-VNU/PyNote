@@ -31,7 +31,7 @@ export default async function DashboardPage() {
         <h1 className="text-xl font-semibold">Notebooks</h1>
         <div className="flex items-center gap-3">
           <OrganizationSwitcher hidePersonal={false} />
-          <UserButton afterSignOutUrl="/" />
+          <UserButton />
         </div>
       </header>
 
@@ -45,8 +45,12 @@ export default async function DashboardPage() {
         )}
         {notebooks.map((n) => (
           <li key={n.id} className="px-4 py-3 text-sm">
-            <span className="font-medium">{n.title}</span>
-            <span className="ml-2 text-neutral-500">{n.id}</span>
+            <a
+              href={`/notebook/${n.id}`}
+              className="font-medium hover:text-neutral-600"
+            >
+              {n.title}
+            </a>
           </li>
         ))}
       </ul>
