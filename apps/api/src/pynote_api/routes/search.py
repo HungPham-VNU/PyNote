@@ -16,11 +16,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pynote_core.embeddings import get_embedder
-from pynote_core.models import Notebook
-
 from pynote_api.auth import Principal
 from pynote_api.deps import current_principal, get_db
+from pynote_core.embeddings import get_embedder
+from pynote_core.models import Notebook
 
 router = APIRouter(tags=["search"])
 

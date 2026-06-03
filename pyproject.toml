@@ -71,6 +71,6 @@ exclude = ["alembic/versions"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["apps", "packages", "tests"]
-pythonpath = ["packages/core/src", "apps/api/src", "apps/worker/src"]
+testpaths = ["apps", "packages", "eval/tests", "tests"]
+pythonpath = ["packages/core/src", "apps/api/src", "apps/worker/src", "."]
 addopts = "-ra --strict-markers"

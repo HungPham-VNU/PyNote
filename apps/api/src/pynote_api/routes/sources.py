@@ -7,11 +7,13 @@ We use multipart-through-API instead of presigned-direct-to-S3 because it's
 simpler and 30MB PDFs upload fine through it. Presign lands later (see PLAN.md).
 """
 
+from collections.abc import Iterable
 from contextlib import suppress
 from uuid import UUID, uuid4
 
 from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +22,7 @@ from pynote_api.auth import Principal
 from pynote_api.deps import current_principal, get_arq, get_db
 from pynote_core.models import Notebook, Source, SourcePart
 from pynote_core.storage import delete as s3_delete
-from pynote_core.storage import upload_bytes
+from pynote_core.storage import get_object_stream, upload_bytes
 
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024  # 30 MB — bump when we add presign
 PDF_CONTENT_TYPE = "application/pdf"
@@ -159,3 +161,42 @@ async def delete_source(
         with suppress(Exception):
             s3_delete(source.bytes_uri)
     await db.delete(source)
+
+
+# ---- file streaming (M5: PDF viewer fetches the original bytes) ----------
+
+
+@router.get("/sources/{source_id}/file")
+async def get_source_file(
+    source_id: UUID,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Stream the source's raw bytes (M5: PDF viewer in the browser).
+
+    Auth-gated so the URL can't be guessed. The web wraps the response in a
+    Blob and feeds it to react-pdf via createObjectURL; no presigned URLs needed
+    in M5 (we'll switch to presign when files outgrow ~30MB).
+    """
+    source = await _owned_source(source_id, principal, db)
+    if not source.bytes_uri:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Source has no stored bytes.")
+
+    body, content_length, content_type = get_object_stream(source.bytes_uri)
+
+    def _iter() -> Iterable[bytes]:
+        # botocore's StreamingBody is sync; iter_chunks is the canonical accessor.
+        yield from body.iter_chunks(chunk_size=1024 * 64)
+
+    headers = {
+        "Content-Disposition": f'inline; filename="{source.title}"',
+        "Cache-Control": "private, max-age=3600",
+    }
+    if content_length is not None:
+        headers["Content-Length"] = str(content_length)
+
+    return StreamingResponse(
+        _iter(),
+        media_type=content_type or "application/pdf",
+        headers=headers,
+    )

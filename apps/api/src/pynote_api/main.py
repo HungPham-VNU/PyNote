@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from pynote_api.routes import health, jobs, notebooks, search, sources
+from pynote_api.routes import chat, health, jobs, notebooks, search, sources
 from pynote_core.settings import get_settings
 from pynote_core.tracing import configure_tracing
 
@@ -23,6 +23,18 @@ from pynote_core.tracing import configure_tracing
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_tracing()
+    # Create LangGraph checkpoint tables if missing. Idempotent.
+    from pynote_core.chat_graph import setup_checkpoint_tables
+
+    # Startup must not crash if DB is briefly unavailable.
+    try:
+        await setup_checkpoint_tables()
+    except Exception:
+        import logging
+
+        logging.getLogger("pynote_api").exception(
+            "Failed to set up LangGraph checkpoint tables; /chat will fail until DB is up."
+        )
     yield
 
 
@@ -51,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(notebooks.router, prefix="/api/v1")
     app.include_router(sources.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
+    app.include_router(chat.router, prefix="/api/v1")
     app.include_router(jobs.router, prefix="/api/v1")
 
     return app

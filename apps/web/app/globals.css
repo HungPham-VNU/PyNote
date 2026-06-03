@@ -9,3 +9,12 @@
 body {
   font-family: var(--font-sans);
 }
+
+/* M5: citation highlight overlay rendered by the CSS Custom Highlight API.
+ * Modern browsers (Chrome 105+, Safari 17.2+) honor this; older ones silently
+ * ignore it and the PDF still opens at the right page. */
+::highlight(pynote-citation) {
+  background-color: rgba(255, 224, 71, 0.55);
+  color: inherit;
+  text-decoration-color: rgba(180, 130, 0, 0.6);
+}

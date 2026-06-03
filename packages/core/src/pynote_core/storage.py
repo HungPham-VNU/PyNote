@@ -8,7 +8,7 @@ streaming arrive when files outgrow ~30MB (see PLAN.md).
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import boto3
 from botocore.client import Config
@@ -64,6 +64,17 @@ def upload_bytes(key: str, data: bytes, content_type: str | None = None) -> str:
         **extra,  # type: ignore[arg-type]
     )
     return make_uri(key)
+
+
+def get_object_stream(uri: str) -> tuple[Any, int | None, str | None]:
+    """Open an S3 object for streaming. Returns (body, content_length, content_type).
+
+    The returned body is a botocore StreamingBody — iterate it in chunks or hand
+    it straight to FastAPI's StreamingResponse.
+    """
+    bucket, key = _split_uri(uri)
+    obj = get_s3_client().get_object(Bucket=bucket, Key=key)
+    return obj["Body"], obj.get("ContentLength"), obj.get("ContentType")
 
 
 def download_to_path(uri: str, dest: Path) -> None:

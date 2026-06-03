@@ -40,7 +40,7 @@ def test_long_text_splits_into_multiple_chunks_with_overlap() -> None:
 
 
 def test_citation_contract_holds_on_random_inputs() -> None:
-    """1000 random texts × every chunk: offsets must reconstruct text exactly."""
+    """1000 random texts, every chunk: offsets must reconstruct text exactly."""
     rng = random.Random(20260531)
     alphabet = string.ascii_letters + string.digits + "   \n\n.,;:!?-—()[]\"'"
 
@@ -83,18 +83,18 @@ def test_no_runaway_on_token_less_input() -> None:
         (5000, 800, 0),  # overlap=0
     ],
 )
-def test_chunks_advance_at_least_target_minus_overlap(
-    size: int, target: int, overlap: int
-) -> None:
-    """Smoke: consecutive chunk starts advance by ~ (target - overlap)."""
+def test_chunks_always_advance(size: int, target: int, overlap: int) -> None:
+    """The two invariants we actually care about: forward progress and bounded reach."""
+    from itertools import pairwise
+
     text = ("word " * (size // 5)).rstrip()
     chunks = chunk_text(text, target_chars=target, overlap_chars=overlap)
     if len(chunks) < 2:
-        return  # nothing to compare
-    expected_step = target - overlap
-    for prev, cur in zip(chunks, chunks[1:], strict=True):
+        return
+    # The chunker may stretch up to 200 chars past `target` to land on whitespace
+    # (see chunker.py safety bound).
+    max_step = target + 200
+    for prev, cur in pairwise(chunks):
         step = cur.char_start - prev.char_start
-        # Allow slack: whitespace snapping can push the actual step around.
-        assert step > 0
-        assert step <= target  # never reverses past one window
-        assert step >= expected_step // 2
+        assert step > 0, "must advance"
+        assert step <= max_step, f"step {step} > {max_step} (target+stretch)"

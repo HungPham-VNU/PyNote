@@ -11,12 +11,15 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from arq.connections import ArqRedis
 from langchain_core.messages import HumanMessage
-from sqlalchemy import select, text as sql_text
+from sqlalchemy import select
+from sqlalchemy import text as sql_text
+
+if TYPE_CHECKING:
+    from arq.connections import ArqRedis
 
 from pynote_core.chunker import chunk_text
 from pynote_core.db import async_session_scope
@@ -143,7 +146,7 @@ async def parse_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
     return {"ok": True, "source_id": source_id, "parts": len(parts)}
 
 
-async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:  # noqa: ARG001
+async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
     """Chunk → embed → persist with tsvector. Marks source `ready` (or `failed`).
 
     Idempotent: clears prior chunks for this source before re-inserting.

@@ -48,7 +48,7 @@ def main() -> None:
             "pynote_api.main:app",
             host=host,
             port=port,
-            loop="none",   # tell uvicorn: do NOT call asyncio_setup
+            loop="none",  # tell uvicorn: do NOT call asyncio_setup
             reload=False,
             log_level=os.environ.get("LOG_LEVEL", "info").lower(),
         )

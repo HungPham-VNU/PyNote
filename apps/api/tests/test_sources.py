@@ -59,3 +59,9 @@ def test_openapi_lists_source_routes(client: TestClient) -> None:
     assert "/api/v1/notebooks/{notebook_id}/sources" in paths
     assert "/api/v1/notebooks/{notebook_id}/sources/upload" in paths
     assert "/api/v1/sources/{source_id}" in paths
+    assert "/api/v1/sources/{source_id}/file" in paths  # M5: PDF stream
+
+
+def test_file_requires_auth(client: TestClient) -> None:
+    resp = client.get("/api/v1/sources/00000000-0000-0000-0000-000000000099/file")
+    assert resp.status_code == 401

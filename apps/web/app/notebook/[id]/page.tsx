@@ -5,6 +5,7 @@ import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { getNotebook, listSources } from "@/lib/api";
 import { SourceUploader } from "@/components/source-uploader";
 import { SourceList } from "@/components/source-list";
+import { ChatPanel } from "@/components/chat-panel";
 
 export default async function NotebookPage({
   params,
@@ -42,11 +43,18 @@ export default async function NotebookPage({
         <SourceUploader notebookId={id} />
       </section>
 
-      <section>
+      <section className="mb-8">
         <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-neutral-500">
           Sources
         </h2>
         <SourceList notebookId={id} initial={sources} />
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-neutral-500">
+          Chat
+        </h2>
+        <ChatPanel notebookId={id} />
       </section>
     </main>
   );
