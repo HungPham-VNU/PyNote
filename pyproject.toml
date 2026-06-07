@@ -20,6 +20,12 @@ dev = [
   "pre-commit>=4.0",
   "types-requests",
 ]
+# Optional — Ragas-based ship-gate metrics. Install with:
+#   uv pip install --group eval
+eval = [
+  "ragas>=0.2",
+  "datasets>=3",
+]
 
 [tool.uv.workspace]
 members = ["apps/api", "apps/worker", "packages/core"]

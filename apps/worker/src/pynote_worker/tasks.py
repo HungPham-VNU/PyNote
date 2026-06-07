@@ -26,6 +26,7 @@ from pynote_core.db import async_session_scope
 from pynote_core.embeddings import get_embedder
 from pynote_core.llm import get_chat_model
 from pynote_core.models import Chunk, Source, SourcePart
+from pynote_core.outliner import generate_outline
 from pynote_core.parsers import ParsedPart
 from pynote_core.parsers import parse as parse_source_file
 from pynote_core.storage import download_to_path
@@ -276,7 +277,74 @@ async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
         int((time.perf_counter() - persist_phase) * 1000),
         total_ms,
     )
+
+    # M6: enqueue best-effort outline generation. Failure does not flip the
+    # source out of `ready` — the source remains usable without suggestions.
+    arq: ArqRedis | None = ctx.get("redis")
+    if arq is not None:
+        await arq.enqueue_job("outline_source", source_id)
+        log.info("embed_source[%s]: enqueued outline_source", sid)
+
     return {"ok": True, "source_id": source_id, "chunks": len(all_chunks)}
+
+
+async def outline_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
+    """Generate `{abstract, key_entities, suggested_questions}` and persist on meta.
+
+    Best-effort: a model or parse failure logs and exits 0 rather than retrying,
+    because the outline is decorative — the source is fully usable without it.
+    """
+    sid = UUID(source_id)
+    started = time.perf_counter()
+    log.info("outline_source[%s]: start", sid)
+
+    # Pull joined text from source parts (the chunker is per-part in M2, but for
+    # outlining we want continuous prose — concat with double-newlines).
+    async with async_session_scope() as db:
+        source = await db.get(Source, sid)
+        if source is None:
+            return {"ok": False, "reason": "source-not-found"}
+        parts_result = await db.execute(
+            select(SourcePart).where(SourcePart.source_id == sid).order_by(SourcePart.ordinal),
+        )
+        parts = list(parts_result.scalars().all())
+
+    joined = "\n\n".join(p.text for p in parts if p.text).strip()
+    if not joined:
+        log.info("outline_source[%s]: empty text — nothing to outline", sid)
+        return {"ok": True, "reason": "empty"}
+
+    try:
+        outline = await generate_outline(joined)
+    except Exception as e:
+        log.warning("outline_source[%s]: generation failed: %s", sid, e)
+        return {"ok": False, "reason": "generation-failed", "error": str(e)[:200]}
+
+    async with async_session_scope() as db:
+        src = await db.get(Source, sid)
+        if src is None:
+            return {"ok": False, "reason": "source-vanished"}
+        src.meta = {
+            **(src.meta or {}),
+            "abstract": outline.abstract,
+            "key_entities": outline.key_entities,
+            "suggested_questions": outline.suggested_questions,
+        }
+
+    total_ms = int((time.perf_counter() - started) * 1000)
+    log.info(
+        "outline_source[%s]: done — %d entities, %d questions in %dms",
+        sid,
+        len(outline.key_entities),
+        len(outline.suggested_questions),
+        total_ms,
+    )
+    return {
+        "ok": True,
+        "source_id": source_id,
+        "n_entities": len(outline.key_entities),
+        "n_questions": len(outline.suggested_questions),
+    }
 
 
 # ---- internals -------------------------------------------------------------

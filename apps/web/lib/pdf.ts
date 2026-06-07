@@ -9,10 +9,11 @@ import { pdfjs } from "react-pdf";
 
 export function configurePdfWorker(): void {
   if (typeof window === "undefined") return;
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+  // Use the local worker file that the user downloaded, rather than relying on cdnjs
+  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = typeof window === "undefined" ? (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000") : "";
 
 /** Fetch the PDF bytes with a Clerk bearer token, return an object URL. */
 export async function fetchPdfBlobUrl(

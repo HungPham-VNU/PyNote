@@ -1,157 +1,176 @@
 # PyNote
 
-A NotebookLM-style RAG application: upload sources, ask grounded questions, get inline citations that jump to the cited source span.
+A NotebookLM-style RAG application: upload PDFs, ask grounded questions, click any citation to jump to the exact source span. Built with Postgres + pgvector, LangGraph, and Anthropic's Citations API.
 
 - **Roadmap** → [PLAN.md](PLAN.md)
-- **Cost & provider choices** (free-tier first) → [COSTS.md](COSTS.md)
+- **Costs & provider choices** → [COSTS.md](COSTS.md)
+- **Ship runbook** → [SHIP.md](SHIP.md)
 
 ## Status
 
-🚧 **M0 — Foundation.** Multi-tenant API + worker + web skeleton, Clerk auth (or dev-headers fallback), Postgres+pgvector, Redis, MinIO, Alembic migrations, LangSmith tracing. Smoke test against Claude via GitHub Models.
+✅ **v1 shipped** — M0 through M7 plus the post-v1 notebook summary artifact and the Material-3 dark theme.
 
-Next: [M1 — Single-PDF ingestion](PLAN.md#m1--single-pdf-ingestion-no-chunking-yet--m).
+| What it does | How |
+|---|---|
+| Multi-tenant cloud-deployable web app | Clerk org-scoped auth + Postgres RLS-ready schema |
+| PDF upload → parse → chunk → embed → outline | PyMuPDF + char-based hierarchical chunker + fastembed BGE-small (384-dim) |
+| Hybrid retrieval | pgvector dense + tsvector sparse, RRF fused in a single SQL CTE |
+| Optional rerank | Voyage rerank-2.5 (200M tok/mo free) |
+| Streaming chat with citations | LangGraph `retrieve → generate → map_citations` with AsyncPostgresSaver, SSE token stream |
+| Citation roundtrip validator | Char-offset slices from chunks compared against Anthropic `cited_text` |
+| PDF viewer with span highlight | `react-pdf` slide-over + CSS Custom Highlight API |
+| Suggested-question chips | Gemini Flash / Haiku outline at ingest time |
+| Notebook summary artifact | One structured Opus/Gemini Pro call, persisted on `notebook.settings` |
+| Eval harness with ship gate | Citation-grounding + lite Ragas-style metrics + optional real Ragas |
 
-## Architecture (M0)
+## Architecture
 
 ```
-apps/web (Next.js 15 + Clerk)
-        │  fetch /api/v1/* (proxied)
+apps/web (Next.js 15 + Clerk + react-pdf + dark Material-3 theme)
+        │  SSE / fetch /api/v1/*
         ▼
-apps/api (FastAPI)            ← Clerk JWT or dev-headers
-        │  SQLAlchemy + arq enqueue
-        ▼
-Postgres 16 + pgvector + pg_trgm    Redis (arq queue)    MinIO (R2-compatible)
-        ▲
-        │  SQLAlchemy
-apps/worker (arq)             ← LangChain → ChatAnthropic (GH Models) | Gemini
+apps/api (FastAPI)         ← Clerk JWT (or X-Dev-* in dev)
+        │
+        ├── notebooks, sources/upload, /file, chat (SSE), threads/{id}/history,
+        │   search (hybrid RRF), summary (Option A)
+        │
+        ▼  enqueue arq  ─────────────────────────────────┐
+apps/worker (arq)                                        │
+  parse_source → embed_source → outline_source           │
+                                                         │
+LangGraph chat_graph (AsyncPostgresSaver)                │
+  retrieve → generate (Anthropic Citations API) →        │
+  map_citations (char-offset roundtrip)                  │
+                                                         ▼
+Postgres 16 + pgvector + pg_trgm   Redis (arq queue)   MinIO / R2
 ```
 
 ## Quickstart
 
 ### Prerequisites
 - Python ≥ 3.12
-- Node ≥ 22 + pnpm 9
+- Node ≥ 22 + pnpm
 - Docker + Docker Compose
 - [uv](https://docs.astral.sh/uv/) for Python deps
-- **Recommended**: [just](https://github.com/casey/just) (`winget install Casey.Just`) + [mprocs](https://github.com/pvolok/mprocs) (`scoop install mprocs`) — one-word commands instead of 5-line incantations.
+- **Recommended**: [just](https://github.com/casey/just) + [mprocs](https://github.com/pvolok/mprocs)
 
 ### TL;DR
-
-Works the same in **Git Bash**, **WSL**, **PowerShell**, **Linux**, **macOS** — the Justfile uses `bash` for all recipes.
 
 ```bash
 just env       # copy .env templates
 just setup     # install all deps
-just up        # start postgres + redis + minio
-just migrate   # apply DB migrations
+just up        # postgres + redis + minio
+just migrate   # apply all migrations (extensions + tables + indexes)
 just dev       # api + worker + web in one terminal (needs mprocs)
-just test      # run the test suite
-just check     # full lint + typecheck + test (what CI runs)
-just doctor    # print installed tool versions
+just test      # run the test suite — 60 passed, 2 skipped
 ```
-`just` with no args lists every available command.
 
-**Prefer Make?** A [Makefile](Makefile) mirrors every recipe — use `make help` for the list. Works in Git Bash, WSL, Linux, macOS (`make` is bundled with Git for Windows).
+`just doctor` prints every required tool's version. A [Makefile](Makefile) mirrors every recipe.
 
 ### 1. Install deps
-```powershell
-# Python workspace
+```bash
 uv sync
 uv pip install -e packages/core -e apps/api -e apps/worker
-
-# Web
-cd apps/web; pnpm install; cd ../..
+cd apps/web && pnpm install && cd ../..
 ```
 
 ### 2. Configure environment
-```powershell
-Copy-Item .env.example .env
-Copy-Item apps/web/.env.example apps/web/.env.local
+```bash
+cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local
 ```
-Then edit both `.env` files. Minimum keys for M0:
-- `ANTHROPIC_API_KEY` — a GitHub PAT (no scopes needed) for free Claude via GitHub Models. Get one at https://github.com/settings/tokens.
-- `LANGSMITH_API_KEY` — optional, for tracing. Free hobby tier at https://smith.langchain.com.
-- Clerk keys are **optional in dev**: if you leave `CLERK_JWKS_URL` empty, the API trusts `X-Dev-User` / `X-Dev-Org` headers, so you can test without setting up Clerk.
+
+The keys that **actually work** for v1 (see "Provider gotchas" below for the failure modes):
+
+| Var | Where | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | https://console.anthropic.com → API Keys → Create | `sk-ant-…`. New accounts get $5 free credit — covers a demo easily. |
+| `GOOGLE_API_KEY` | https://aistudio.google.com/apikey | Free tier. Used for outline (Flash, 1500/day) and summary on free-tier mode. |
+| `EMBEDDING_DIM` | `.env` | Must be **384** to match the default `BAAI/bge-small-en-v1.5`. The migration reads this at runtime. |
+| `PROVIDER_TIER` | `.env` | `prod` to route summary/outline through Claude when you have the Anthropic key. `free` to route them through Gemini. |
+| `CLERK_*` | https://dashboard.clerk.com | Required for the web app. Enable Organizations + disable Personal accounts so the JWT carries `org_id`. |
+| `LANGSMITH_API_KEY` | https://smith.langchain.com | Optional — auto-traces every LangGraph node. |
+| `VOYAGE_API_KEY` | https://voyageai.com | Optional — rerank-2.5 has 200M tok/mo free. Falls back to top-K hybrid without it. |
+
+**Do not set `ANTHROPIC_BASE_URL`.** Leave it unset (or `https://api.anthropic.com`). The previously documented GitHub Models route does not work with `langchain-anthropic` — see "Provider gotchas" below.
 
 ### 3. Start local services
-```powershell
-docker compose -f docker-compose.dev.yml up -d
+```bash
+just up
 ```
-Brings up Postgres (5432), Redis (6379), MinIO (9000, console at 9001).
 
 ### 4. Run migrations
-```powershell
-uv run alembic upgrade head
+```bash
+just migrate
 ```
 
+Creates extensions (`vector`, `pg_trgm`, `btree_gin`), tenancy tables, source/chunk schema, HNSW + GIN indexes, and the LangGraph checkpoint tables (auto-created on first API startup).
+
 ### 5. Run api + worker + web
+One terminal with mprocs, or three terminals:
 
-Easiest — one terminal with `just dev` (needs `mprocs`), or `just up && just api` / `just worker` / `just web` in three terminals.
-
-Raw commands if you don't want the runner:
 ```bash
-# Terminal 1 — API
-#   Do NOT use `uvicorn pynote_api.main:app` directly on Windows: psycopg3 async
-#   requires WindowsSelectorEventLoopPolicy, which must be installed BEFORE
-#   uvicorn loads. The module entrypoint sets it first.
+# Windows-safe API entrypoint (sets WindowsSelectorEventLoopPolicy before uvicorn)
 uv run python -m pynote_api
+# NEVER use `uvicorn pynote_api.main:app` directly on Windows — psycopg3 async dies on ProactorEventLoop.
 
-# Terminal 2 — Worker
-uv run arq pynote_worker.main.WorkerSettings
-
-# Terminal 3 — Web
+uv run python -m pynote_worker     # same Windows fix for arq
 cd apps/web && pnpm dev
 ```
 
 Visit http://localhost:3000.
 
-### 6. Smoke test
-```powershell
-# Unit tests (no live services needed beyond Postgres for some).
-uv run pytest -q
-
-# End-to-end LLM ping (requires ANTHROPIC_API_KEY set).
-uv run pytest packages/core/tests/test_llm_factory.py::test_smoke_chat_ping -q
-```
-
-A successful smoke test produces one trace in your LangSmith project (`pynote-dev` by default).
-
-### 7. Quick API check without the web app
-```powershell
-# Create a notebook using dev-header auth (works when CLERK_JWKS_URL is unset).
-curl -X POST http://localhost:8000/api/v1/notebooks `
-  -H "Content-Type: application/json" `
-  -H "X-Dev-User: dev_user_1" `
-  -H "X-Dev-Org: dev_org_1" `
-  -d '{"title":"My first notebook"}'
+### 6. Smoke tests
+```bash
+uv run pytest -q                                  # 60 passed, 2 skipped
+uv run python -m eval.prototype.m3 health         # checks providers + DB + chunk count
 ```
 
 ## Repository layout
 
 ```
 apps/
-  api/          FastAPI service — routes, auth, deps
-  worker/       arq worker — ingest, embedding, outline jobs (M1+)
-  web/          Next.js 15 + Clerk + Tailwind
+  api/      FastAPI service — routes (notebooks, sources, search, chat, summary, jobs, health), auth
+  worker/   arq worker — parse_source, embed_source, outline_source
+  web/      Next.js 15 + Clerk + react-pdf + Material-3 dark theme
 packages/
-  core/         Shared Python: settings, models, db, llm, tracing
-  shared-types/ OpenAPI → TypeScript (populated in M1)
-infra/
-  postgres-init.sql
-alembic/        Migrations
-eval/           Golden set + Ragas harness (populated in M3/M7)
-PLAN.md         Roadmap (M0 → M17)
-COSTS.md        Provider matrix + free-tier defaults
+  core/     Shared Python — settings, models, db, llm factory, embeddings, chunker,
+            retrieval (hybrid SQL + Voyage rerank), citations (parse + validate),
+            chat_graph (LangGraph), outliner, summarizer, tracing
+infra/      Postgres init + docker-compose service config
+alembic/    Migrations 0001 (tenancy) → 0002 (sources) → 0003 (chunks + HNSW + GIN)
+eval/
+  prototype/  M3 CLI: health / ask / chat / select / stability / bulk
+  metrics.py  Citation grounding + lite faithfulness/relevancy + ship-gate aggregator
+  ragas_metrics.py  Optional Ragas integration (cheap-model judge)
+  run.py    M7 ship-gate runner — exit code === gate verdict
+  golden/   Sample JSONL question sets
+PLAN.md     Roadmap M0 → M17
+COSTS.md    Provider matrix (with the gotchas listed below)
+SHIP.md     Demo runbook + gate thresholds
 ```
 
-## M0 acceptance criteria
+## v1 acceptance — what works
 
-- [x] `docker compose up` brings up a working stack
-- [ ] After alembic upgrade, the dashboard lists notebooks for a Clerk org
-- [ ] `noop_task` enqueued via API completes in the worker
-- [ ] One LangSmith trace visible from `test_smoke_chat_ping`
+- [x] PDF upload → status pill flips `parsing → embedding → ready` within ~30 s
+- [x] "Try asking…" chips render once the outline job finishes
+- [x] Chat tokens stream via SSE
+- [x] Citation pills `[1] [2]` appear after the answer; click → PDF drawer at the cited page with yellow highlight
+- [x] Conversation persists across page refresh (`?thread=` URL + `PostgresSaver`)
+- [x] Notebook summary generates in ~10 s and caches on `notebook.settings`
+- [x] Eval gate: `python -m eval.run --notebook <uuid> --file eval/golden/sample.jsonl` exits 0 when `citation_grounding ≥ 0.90`
 
-(The last three depend on real environment values being filled in; the scaffolding is in place.)
+## Provider gotchas (learned the hard way)
+
+| Symptom | Real cause | Fix |
+|---|---|---|
+| Chat returns `401 - No authorization header` | `ANTHROPIC_BASE_URL` points at GitHub Models. The Anthropic SDK sends `x-api-key`; GH Models wants `Authorization: Bearer`. **The GH Models bridge in COSTS.md is broken.** | Unset `ANTHROPIC_BASE_URL` and use a real `sk-ant-…` key. $5 signup credit covers a demo. |
+| Summary returns 400 `temperature is deprecated for this model` | Opus 4+ rejects the `temperature` parameter. | Already fixed in `_anthropic_kwargs` — temperature is no longer set for any Anthropic call. |
+| Summary returns 429 RESOURCE_EXHAUSTED | Gemini 2.5 Pro free tier is 50 req/day. | Either set `PROVIDER_TIER=prod` to use Opus, or set `GEMINI_MODEL_HEAVY=gemini-2.0-flash` (1500/day). |
+| Embed inserts crash `expected vector(1024)` | `EMBEDDING_DIM` in `.env` doesn't match the actual embedder output. BGE-small is 384-dim. | Set `EMBEDDING_DIM=384`, drop the `chunk` table, re-migrate, re-upload. |
+| Source stuck at `embedding` | Worker started with `arq` CLI instead of `python -m pynote_worker` on Windows — Proactor loop kills psycopg3. | Use `just worker` (or `uv run python -m pynote_worker`). |
+| Outline 401 | `get_cheap_model()` fell back to Anthropic Haiku without a working Anthropic key. | Set `GOOGLE_API_KEY` so the cheap path uses Gemini Flash. |
+| `relation "chunk" does not exist` | Migration `0003_chunks` hasn't run. | `just migrate`. If alembic is desynced, `alembic stamp 0002 && alembic upgrade head`. |
 
 ## License
 

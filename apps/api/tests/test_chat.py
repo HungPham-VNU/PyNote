@@ -44,3 +44,12 @@ def test_routes_mounted_in_openapi(client: TestClient) -> None:
     paths = spec["paths"].keys()
     assert "/api/v1/notebooks/{notebook_id}/chat" in paths
     assert "/api/v1/notebooks/{notebook_id}/threads/{thread_id}/history" in paths
+    # Option A: summary endpoints mounted under the notebook
+    assert "/api/v1/notebooks/{notebook_id}/summary" in paths
+
+
+def test_summary_requires_auth(client: TestClient) -> None:
+    resp = client.get(f"/api/v1/notebooks/{NB_ID}/summary")
+    assert resp.status_code == 401
+    resp = client.post(f"/api/v1/notebooks/{NB_ID}/summary")
+    assert resp.status_code == 401

@@ -49,17 +49,18 @@ export function SourceUploader({ notebookId }: { notebookId: string }) {
           const f = e.dataTransfer.files?.[0];
           if (f) submit(f);
         }}
-        className={`flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed px-6 py-10 text-center text-sm transition-colors ${
+        className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 text-center text-xs transition-colors ${
           dragging
-            ? "border-neutral-900 bg-neutral-100"
-            : "border-neutral-300 hover:bg-neutral-50"
+            ? "border-[#4d8eff] bg-[#4d8eff]/10"
+            : "border-[#424754] hover:border-[#8c909f] hover:bg-[#201f20]"
         } ${pending ? "pointer-events-none opacity-60" : ""}`}
       >
-        <span className="font-medium">
-          {pending ? "Uploading…" : "Drop a PDF here, or click to choose"}
+        <span className="text-2xl text-[#8c909f]">↑</span>
+        <span className="mt-1 font-medium text-[#e5e2e3]">
+          {pending ? "Uploading…" : "Drag & Drop a PDF"}
         </span>
-        <span className="mt-1 text-xs text-neutral-500">
-          PDF only, up to {MAX_MB}MB
+        <span className="mt-0.5 text-[#c2c6d6]">
+          or click to browse · max {MAX_MB}MB
         </span>
         <input
           type="file"
@@ -74,7 +75,7 @@ export function SourceUploader({ notebookId }: { notebookId: string }) {
         />
       </label>
       {error && (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-xs text-red-400" role="alert">
           {error}
         </p>
       )}

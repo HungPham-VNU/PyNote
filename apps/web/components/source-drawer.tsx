@@ -42,27 +42,27 @@ export function SourceDrawer({
         onClick={onClose}
         className="flex-1 bg-black/30 transition-opacity"
       />
-      <aside className="flex h-full w-full max-w-[760px] flex-col gap-3 overflow-y-auto bg-white p-4 shadow-xl">
-        <header className="flex items-center justify-between gap-3 border-b border-neutral-200 pb-2">
+      <aside className="flex h-full w-full max-w-[780px] flex-col gap-3 overflow-y-auto bg-[#1c1b1c] p-5 shadow-2xl">
+        <header className="flex items-center justify-between gap-3 border-b border-[#424754] pb-3">
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">
+            <h2 className="truncate text-sm font-semibold text-[#e5e2e3]">
               {target.sourceTitle ?? "Source"}
             </h2>
             {target.page && (
-              <p className="text-xs text-neutral-500">Page {target.page}</p>
+              <p className="text-xs text-[#c2c6d6]">Page {target.page}</p>
             )}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50"
+            className="rounded-lg border border-[#424754] px-3 py-1 text-xs text-[#e5e2e3] hover:bg-[#2a2a2b]"
           >
             Close
           </button>
         </header>
 
-        <section className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          <span className="font-medium">Cited passage:</span>{" "}
+        <section className="rounded-lg border border-[#fcd34d]/30 bg-[#fcd34d]/10 px-3 py-2 text-xs text-[#fcd34d]">
+          <span className="font-semibold">Cited passage:</span>{" "}
           <span className="italic">“{target.citedText}”</span>
         </section>
 

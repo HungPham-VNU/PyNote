@@ -7,13 +7,12 @@ We use multipart-through-API instead of presigned-direct-to-S3 because it's
 simpler and 30MB PDFs upload fine through it. Presign lands later (see PLAN.md).
 """
 
-from collections.abc import Iterable
 from contextlib import suppress
+from typing import Any
 from uuid import UUID, uuid4
 
 from arq.connections import ArqRedis
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +37,9 @@ class SourceOut(BaseModel):
     title: str
     byte_size: int | None
     error: str | None
+    # M6: outliner output lives here under keys `abstract`, `key_entities`,
+    # `suggested_questions`. Empty until outline_source runs.
+    meta: dict[str, Any] = {}
 
     model_config = {"from_attributes": True}
 
@@ -171,32 +173,55 @@ async def get_source_file(
     source_id: UUID,
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
-) -> StreamingResponse:
-    """Stream the source's raw bytes (M5: PDF viewer in the browser).
+) -> Response:
+    """Return the source's raw bytes (M5: PDF viewer in the browser).
 
-    Auth-gated so the URL can't be guessed. The web wraps the response in a
-    Blob and feeds it to react-pdf via createObjectURL; no presigned URLs needed
-    in M5 (we'll switch to presign when files outgrow ~30MB).
+    Auth-gated so the URL can't be guessed. PDFs are capped at 30MB on upload,
+    so reading the entire body into memory before responding is fine and
+    sidesteps the sync-streaming-in-async edge cases that caused 'Failed to
+    fetch' errors in the browser when the connection dropped mid-stream.
     """
+    import asyncio
+    import logging
+
+    log = logging.getLogger("pynote_api.sources")
+
     source = await _owned_source(source_id, principal, db)
     if not source.bytes_uri:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Source has no stored bytes.")
 
-    body, content_length, content_type = get_object_stream(source.bytes_uri)
+    # Read the entire object body off-thread so we don't block the event loop.
+    try:
+        data = await asyncio.to_thread(_read_object_bytes, source.bytes_uri)
+    except Exception as e:
+        log.exception("Failed to read source bytes from object store: %s", e)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Could not fetch source bytes: {type(e).__name__}",
+        ) from e
 
-    def _iter() -> Iterable[bytes]:
-        # botocore's StreamingBody is sync; iter_chunks is the canonical accessor.
-        yield from body.iter_chunks(chunk_size=1024 * 64)
+    # Content-Disposition can choke on non-ASCII or special chars. Sanitize.
+    safe_name = _ascii_safe_filename(source.title)
 
-    headers = {
-        "Content-Disposition": f'inline; filename="{source.title}"',
-        "Cache-Control": "private, max-age=3600",
-    }
-    if content_length is not None:
-        headers["Content-Length"] = str(content_length)
-
-    return StreamingResponse(
-        _iter(),
-        media_type=content_type or "application/pdf",
-        headers=headers,
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{safe_name}"',
+            "Cache-Control": "private, max-age=3600",
+            "Content-Length": str(len(data)),
+        },
     )
+
+
+def _read_object_bytes(uri: str) -> bytes:
+    """Synchronous helper — runs in a worker thread via asyncio.to_thread."""
+    body, _length, _ct = get_object_stream(uri)
+    return body.read()
+
+
+def _ascii_safe_filename(name: str) -> str:
+    """Strip characters that would break a quoted Content-Disposition header."""
+    cleaned = name.encode("ascii", errors="ignore").decode("ascii")
+    cleaned = cleaned.replace('"', "").replace("\\", "").replace("\r", "").replace("\n", "")
+    return cleaned or "source.pdf"

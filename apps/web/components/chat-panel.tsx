@@ -5,6 +5,9 @@ import { useAuth } from "@clerk/nextjs";
 import { type Citation, type HistoryMessage, getHistory, streamChat } from "@/lib/chat";
 import { CitationPill } from "@/components/citation-pill";
 import { SourceDrawer, type DrawerTarget } from "@/components/source-drawer";
+import { FILL_CHAT_EVENT } from "@/components/suggested-questions";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Msg = {
   role: "user" | "assistant";
@@ -13,7 +16,13 @@ type Msg = {
   pending?: boolean;
 };
 
-export function ChatPanel({ notebookId }: { notebookId: string }) {
+export function ChatPanel({
+  notebookId,
+  hasReadySource = true,
+}: {
+  notebookId: string;
+  hasReadySource?: boolean;
+}) {
   const { getToken } = useAuth();
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -49,18 +58,42 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
     return () => document.removeEventListener("mouseup", onSelect);
   }, []);
 
-  // ---- restore thread on mount if one is in the URL
+  // ---- fill input when a SuggestedQuestion chip is clicked
+  useEffect(() => {
+    const onFill = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (typeof detail === "string") setInput(detail);
+    };
+    window.addEventListener(FILL_CHAT_EVENT, onFill);
+    return () => window.removeEventListener(FILL_CHAT_EVENT, onFill);
+  }, []);
+
+  // ---- restore thread on mount: prefer ?thread= URL param, otherwise pick up
+  //      the last thread the user used for THIS notebook (per-browser localStorage).
   useEffect(() => {
     const url = new URL(window.location.href);
-    const t = url.searchParams.get("thread");
+    const fromUrl = url.searchParams.get("thread");
+    const fromStorage =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem(`pynote:lastThread:${notebookId}`)
+        : null;
+    const t = fromUrl ?? fromStorage;
     if (!t) return;
+
     setThreadId(t);
+    // Also reflect the resumed thread in the URL so refresh / share-link still works.
+    if (!fromUrl) {
+      url.searchParams.set("thread", t);
+      window.history.replaceState({}, "", url.toString());
+    }
     (async () => {
       try {
         const token = await getToken();
         const { messages: hm } = await getHistory(token, notebookId, t);
         setMessages(hm.map((m: HistoryMessage) => ({ ...m })));
       } catch (e) {
+        // If the stored thread no longer exists (e.g. wiped DB), clear it.
+        window.localStorage.removeItem(`pynote:lastThread:${notebookId}`);
         setError(e instanceof Error ? e.message : String(e));
       }
     })();
@@ -102,6 +135,12 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
       );
       for await (const evt of stream) {
         if (evt.type === "start") {
+          // Always remember the latest thread we're talking on so navigating
+          // away and back picks up where we left off.
+          window.localStorage.setItem(
+            `pynote:lastThread:${notebookId}`,
+            evt.thread_id,
+          );
           if (!threadId) {
             setThreadId(evt.thread_id);
             const url = new URL(window.location.href);
@@ -151,13 +190,25 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
   }, [input, selection, streaming, notebookId, threadId, getToken]);
 
   return (
-    <div className="flex flex-col gap-3" data-no-select>
-      <div className="rounded-md border border-neutral-200 bg-white">
-        <div className="max-h-[480px] min-h-[200px] overflow-y-auto px-4 py-3">
+    <div className="flex h-full min-h-[440px] flex-col gap-3" data-no-select>
+      <div className="flex max-h-[520px] min-h-[260px] flex-1 flex-col overflow-hidden rounded-xl border border-[#424754] bg-[#131314]">
+        <div className="flex-1 overflow-y-auto px-4 py-3">
           {messages.length === 0 && (
-            <p className="py-8 text-center text-sm text-neutral-500">
-              Ask a question about your sources.
-            </p>
+            <div className="flex h-full flex-col items-center justify-center py-12 text-center">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-[#4d8eff]/20 text-[#adc6ff]">
+                ✦
+              </div>
+              <p className="text-sm text-[#e5e2e3]">
+                {hasReadySource
+                  ? "I'm ready to help you analyze your documents."
+                  : "Upload a PDF source to start asking questions."}
+              </p>
+              {hasReadySource && (
+                <p className="mt-1 text-xs text-[#c2c6d6]">
+                  Click a suggested chip above, or type your own question below.
+                </p>
+              )}
+            </div>
           )}
           {messages.map((m, i) => (
             <MessageView key={i} msg={m} onCite={openCitation} />
@@ -166,7 +217,7 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
         </div>
 
         {selection && (
-          <div className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+          <div className="border-t border-[#fcd34d]/30 bg-[#fcd34d]/10 px-4 py-2 text-xs text-[#fcd34d]">
             <span className="font-medium">Use as context:</span>{" "}
             <span className="italic">
               {selection.length > 160 ? selection.slice(0, 160) + "…" : selection}
@@ -186,29 +237,35 @@ export function ChatPanel({ notebookId }: { notebookId: string }) {
             e.preventDefault();
             void send();
           }}
-          className="flex gap-2 border-t border-neutral-200 p-2"
+          className="flex gap-2 border-t border-[#424754] bg-[#1c1b1c] p-2.5"
         >
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              streaming ? "Streaming…" : "Ask anything about your sources"
+              !hasReadySource
+                ? "Add a ready source first…"
+                : streaming
+                  ? "Streaming…"
+                  : "Ask a question about the documents…"
             }
-            disabled={streaming}
-            className="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-400 disabled:bg-neutral-100"
+            disabled={streaming || !hasReadySource}
+            className="flex-1 rounded-lg border border-[#424754] bg-[#201f20] px-3 py-2 text-sm text-[#e5e2e3] placeholder:text-[#8c909f] focus:border-[#4d8eff] focus:outline-none focus:ring-2 focus:ring-[#4d8eff]/30 disabled:opacity-60"
           />
           <button
             type="submit"
-            disabled={streaming || input.trim().length === 0}
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+            disabled={
+              streaming || !hasReadySource || input.trim().length === 0
+            }
+            className="rounded-lg bg-[#4d8eff] px-4 py-2 text-sm font-semibold text-[#00285d] transition-colors hover:bg-[#adc6ff] disabled:opacity-50"
           >
-            Send
+            ▶
           </button>
         </form>
 
         {error && (
-          <p className="border-t border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
+          <p className="border-t border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-300">
             {error}
           </p>
         )}
@@ -228,13 +285,37 @@ function MessageView({
 }) {
   const isUser = msg.role === "user";
   return (
-    <div className={`mb-3 ${isUser ? "text-right" : "text-left"}`}>
+    <div
+      className={`mb-3 flex items-start gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+    >
       <div
-        className={`inline-block max-w-[90%] whitespace-pre-wrap rounded-md px-3 py-2 text-sm ${
-          isUser ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-900"
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+          isUser
+            ? "bg-[#adc6ff]/20 text-[#adc6ff]"
+            : "bg-[#4d8eff]/20 text-[#adc6ff]"
+        }`}
+        aria-hidden
+      >
+        {isUser ? "U" : "✦"}
+      </div>
+      <div
+        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed overflow-hidden ${
+          isUser
+            ? "bg-[#4d8eff] text-[#00285d]"
+            : "bg-[#2a2a2b] text-[#e5e2e3]"
         }`}
       >
-        {msg.content || (msg.pending ? "…" : "")}
+        {isUser ? (
+          <div className="whitespace-pre-wrap">
+            {msg.content || (msg.pending ? "…" : "")}
+          </div>
+        ) : (
+          <div className="prose prose-sm prose-invert max-w-none break-words">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {msg.content || (msg.pending ? "…" : "")}
+            </ReactMarkdown>
+          </div>
+        )}
         {msg.citations.length > 0 && (
           <span className="ml-1">
             {msg.citations.map((c, i) => (

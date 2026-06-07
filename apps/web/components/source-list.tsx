@@ -62,37 +62,55 @@ export function SourceList({
 
   if (sources.length === 0) {
     return (
-      <p className="rounded-md border border-dashed border-neutral-300 px-4 py-6 text-center text-sm text-neutral-500">
+      <p className="rounded-xl border border-dashed border-[#424754] px-4 py-5 text-center text-xs text-[#c2c6d6]">
         No sources yet. Upload a PDF above.
       </p>
     );
   }
 
   return (
-    <ul className="divide-y divide-neutral-200 rounded-md border border-neutral-200 bg-white">
+    <ul className="flex flex-col gap-1.5">
       {sources.map((s) => (
         <li
           key={s.id}
-          className="flex items-center justify-between gap-4 px-4 py-3 text-sm"
+          className="rounded-xl border border-[#424754] bg-[#201f20] p-3 transition-colors hover:border-[#8c909f]"
         >
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate font-medium">{s.title}</span>
-              <StatusPill status={s.status} />
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-start gap-2">
+              <span
+                aria-hidden
+                className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#4d8eff]/15 text-xs text-[#adc6ff]"
+              >
+                📄
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-[#e5e2e3]">
+                  {s.title}
+                </p>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <StatusPill status={s.status} />
+                  {s.byte_size && (
+                    <span className="text-[10px] text-[#c2c6d6]">
+                      {(s.byte_size / 1024 / 1024).toFixed(1)} MB
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
-            {s.error && (
-              <p className="mt-1 text-xs text-red-600" title={s.error}>
-                {s.error}
-              </p>
-            )}
+            <button
+              type="button"
+              onClick={() => onDelete(s.id)}
+              aria-label="Delete source"
+              className="ml-1 rounded-md p-1 text-[10px] text-[#c2c6d6] transition-colors hover:bg-[#2a2a2b] hover:text-red-400"
+            >
+              ✕
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => onDelete(s.id)}
-            className="text-xs text-neutral-500 hover:text-red-600"
-          >
-            Delete
-          </button>
+          {s.error && (
+            <p className="mt-2 text-[10px] text-red-400" title={s.error}>
+              {s.error}
+            </p>
+          )}
         </li>
       ))}
     </ul>

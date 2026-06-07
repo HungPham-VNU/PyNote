@@ -1,13 +1,13 @@
 # PyNote — Plan to NotebookLM Parity
 
 > A staged plan from greenfield to NotebookLM-class application.
-> Author: Plan generated 2026-05-27. Update the **status** column as you ship.
+> Plan written 2026-05-27. **v1 shipped 2026-06-07** through M7 plus a notebook-summary artifact and the Material-3 dark-theme redesign. See the milestone status table at §8 for what's done vs deferred.
 
 ---
 
 ## 0. Locked-in decisions
 
-> **Provider / pricing**: see [COSTS.md](COSTS.md). For the university-project free-tier configuration, providers in the table below are swapped (e.g., Claude via GitHub Models, Gemini for cheap ops, BGE-M3 local embeddings) but the architecture is unchanged.
+> **Provider / pricing**: see [COSTS.md](COSTS.md). The university free-tier configuration originally pitched routing Claude through GitHub Models for free — that path turned out broken with `langchain-anthropic` (sends `x-api-key`, GH Models expects `Authorization: Bearer`). v1 ships on the real Anthropic API (`sk-ant-…`) using the $5 signup credit; Gemini covers outline + summary on the cheap-model path.
 
 | Area | Choice | Rationale |
 |---|---|---|
@@ -629,24 +629,26 @@ These can be deferred but should be decided before the relevant milestone:
 
 | # | Milestone | Effort | Status | Notes |
 |---|---|---|---|---|
-| M0 | Foundation | M | ☐ | |
-| M1 | Single-PDF ingest | M | ☐ | |
-| M2 | Chunking + embedding | M | ☐ | |
-| M3 | Retrieval/Citations prototype | S | ☐ | De-risk gate |
-| M4 | Chat end-to-end | L | ☐ | |
-| M5 | PDF viewer + citation jump | M | ☐ | |
-| M6 | Suggested questions | S | ☐ | |
-| M7 | Eval + polish → ship v1 | M | ☐ | 🚀 v1 |
-| M8 | Multi-source ingestion | L | ☐ | |
-| M9 | Notes as sources | S | ☐ | |
-| M10 | Artifact framework | M | ☐ | |
-| M11 | Study artifacts | L | ☐ | |
-| M12 | Mind map → ship v2 | M | ☐ | 🚀 v2 |
-| M13 | Audio overview → ship v3 | L | ☐ | 🚀 v3 |
-| M14 | Vision RAG | L | ☐ | |
-| M15 | Sharing | M | ☐ | |
-| M16 | Tenancy hardening | L | ☐ | |
-| M17 | BYOK + on-prem → ship v4 | XL | ☐ | 🚀 v4 |
+| M0 | Foundation | M | ✅ | Repo, docker, Clerk, LangSmith, Alembic |
+| M1 | Single-PDF ingest | M | ✅ | PyMuPDF; multipart upload via API |
+| M2 | Chunking + embedding | M | ✅ | Char-based chunker, BGE-small 384-dim, hybrid SQL RRF |
+| M3 | Retrieval/Citations prototype | S | ✅ | `eval/prototype/m3.py` — 5 smoke subcommands + bulk grader |
+| M4 | Chat end-to-end | L | ✅ | LangGraph + AsyncPostgresSaver + SSE + thread history |
+| M5 | PDF viewer + citation jump | M | ✅ | `react-pdf` slide-over + CSS Custom Highlight API |
+| M6 | Suggested questions | S | ✅ | Outline → 3-5 chips per source, prefill chat input |
+| M7 | Eval + polish → ship v1 | M | ✅ 🚀 v1 | `eval/run.py` ship gate, lite + Ragas metrics |
+| **post-v1 polish** | Notebook summary artifact (Option A) | S | ✅ | `POST /notebooks/{id}/summary`, drawer in UI |
+| **post-v1 polish** | Material-3 dark theme (Stitch) | S | ✅ | 2-column workspace, dark surfaces, indigo accents |
+| M8 | Multi-source ingestion | L | ☐ | Deferred — DOCX, URL, YouTube, audio, image |
+| M9 | Notes as sources | S | ☐ | Deferred |
+| M10 | Artifact framework | M | ☐ | Subsumed by summary (post-v1) for the single-artifact case |
+| M11 | Study artifacts | L | ☐ | Deferred — FAQ, study guide, briefing doc, timeline |
+| M12 | Mind map → ship v2 | M | ☐ | Deferred |
+| M13 | Audio overview → ship v3 | L | ☐ | Deferred |
+| M14 | Vision RAG | L | ☐ | Deferred |
+| M15 | Sharing | M | ☐ | Deferred |
+| M16 | Tenancy hardening | L | ☐ | Deferred |
+| M17 | BYOK + on-prem → ship v4 | XL | ☐ | Deferred |
 
 **Estimated total**: 14–22 focused-dev-weeks solo to M17.
 **v1 alone**: 3–5 weeks.

@@ -16,6 +16,12 @@ export type SourceStatus =
   | "ready"
   | "failed";
 
+export type SourceMeta = {
+  abstract?: string;
+  key_entities?: string[];
+  suggested_questions?: string[];
+};
+
 export type Source = {
   id: string;
   notebook_id: string;
@@ -24,9 +30,10 @@ export type Source = {
   title: string;
   byte_size: number | null;
   error: string | null;
+  meta?: SourceMeta;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = typeof window === "undefined" ? (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000") : "";
 
 async function request<T>(
   path: string,
@@ -102,5 +109,38 @@ export async function deleteSource(
   return request<void>(`/api/v1/sources/${sourceId}`, {
     token,
     method: "DELETE",
+  });
+}
+
+// ---- Summary -------------------------------------------------------------
+
+export type NotebookSummary = {
+  headline: string;
+  key_points: string[];
+  detailed_summary: string;
+  generated_at: string;
+  model_used: string | null;
+};
+
+export async function getNotebookSummary(
+  token: string | null,
+  notebookId: string,
+): Promise<NotebookSummary | null> {
+  const res = await fetch(`${API_BASE}/api/v1/notebooks/${notebookId}/summary`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`summary HTTP ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+export async function generateNotebookSummary(
+  token: string | null,
+  notebookId: string,
+): Promise<NotebookSummary> {
+  return request<NotebookSummary>(`/api/v1/notebooks/${notebookId}/summary`, {
+    token,
+    method: "POST",
   });
 }
