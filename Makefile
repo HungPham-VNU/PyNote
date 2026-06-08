@@ -62,11 +62,11 @@ psql:  ## Open psql shell
 dev:  ## Run api+worker+web in one terminal (needs mprocs)
 	mprocs --config mprocs.yaml
 
-api:  ## Run only the API
-	uv run uvicorn pynote_api.main:app --reload --port 8000
+api:  ## Run only the API (uses module entrypoint so Windows SelectorEventLoop is set first)
+	uv run python -m pynote_api
 
-worker:  ## Run only the worker
-	uv run arq pynote_worker.main.WorkerSettings
+worker:  ## Run only the worker (uses module entrypoint so Windows SelectorEventLoop is set first)
+	uv run python -m pynote_worker
 
 web:  ## Run only the web app
 	cd apps/web && pnpm dev

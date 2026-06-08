@@ -43,6 +43,10 @@ data/
 .minio/
 .postgres/
 .redis/
+
+# ---- Eval outputs (generated; keep golden inputs in git) ----
+eval/results/
+eval/fixtures/*.pdf
 tmp/
 *.sqlite3
 *.sqlite3-journal

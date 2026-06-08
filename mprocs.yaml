@@ -10,11 +10,13 @@ procs:
     autostart: true
 
   api:
-    shell: uv run uvicorn pynote_api.main:app --reload --port 8000
+    # Module entrypoint installs WindowsSelectorEventLoopPolicy before uvicorn loads.
+    shell: uv run python -m pynote_api
     autostart: true
 
   worker:
-    shell: uv run arq pynote_worker.main.WorkerSettings
+    # Same Windows policy fix for arq.
+    shell: uv run python -m pynote_worker
     autostart: true
 
   web:

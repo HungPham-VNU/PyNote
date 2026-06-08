@@ -1,7 +1,8 @@
-# PyNote — Cost & Free-Tier Configuration
+# PyNote — Cost & Provider Configuration
 
 > Companion to [PLAN.md](PLAN.md). The plan defines *what* we're building; this doc defines *which providers* we use to pay for it.
-> Default target: **$0/month** (university project). A "demo-day burst budget" of ~$10 one-time is optional for the final showcase.
+>
+> **🛑 Post-mortem update (2026-06-07):** the "Claude via GitHub Models" path documented below **does not work** with `langchain-anthropic`. The Anthropic SDK ships the API key as `x-api-key`; the GH Models endpoint expects `Authorization: Bearer`. v1 actually ships on a **real Anthropic API key** using the $5 signup credit. The original guidance is preserved below with a strikethrough so the history is honest, and §3a + §11 record what we actually use.
 
 ---
 
@@ -35,11 +36,35 @@ Useful as the reference for "what would this cost if I paid." Source: claude.com
 
 ---
 
-## 3. Free-tier stack (the default)
+## 3a. What v1 actually ships on (the truth, post-build)
+
+After three rounds of debugging the GH Models path, this is the config that demoably works:
+
+| Layer | Provider | Cost | Notes |
+|---|---|---|---|
+| **Chat LLM (citations)** | **Anthropic API direct** (`sk-ant-…`) | ~$0.02 / chat turn | $5 signup credit covers ~250 turns. No `ANTHROPIC_BASE_URL` set. |
+| **Cheap LLM (outline)** | Gemini 2.0 Flash (`get_cheap_model()`) | $0 | 1500 RPD free tier. `GOOGLE_API_KEY` from aistudio.google.com |
+| **Heavy LLM (summary)** | Gemini 2.0 Flash *or* Claude Opus 4.7 | $0 (Flash) / ~$0.08 (Opus) | `PROVIDER_TIER=prod` routes summary to Opus. `GEMINI_MODEL_HEAVY=gemini-2.0-flash` to stay free. Do NOT use `gemini-2.5-pro` for demos — 50 RPD hits in minutes. |
+| **Embeddings** | fastembed `BAAI/bge-small-en-v1.5` (local) | $0 | 384-dim, ~130 MB ONNX. Must set `EMBEDDING_DIM=384` in `.env`. |
+| **Rerank** | Voyage rerank-2.5 (optional) | $0 (200M tok/mo free) | Falls back gracefully to top-K hybrid if not set. |
+| **Vector DB / sparse** | pgvector + tsvector in Postgres | $0 | Local Docker |
+| **Object storage (dev)** | MinIO in Docker | $0 | |
+| **Auth** | Clerk free tier | $0 | 10k MAU |
+| **Observability** | LangSmith hobby | $0 | 5k traces/mo |
+
+Total runtime cost for a demo: well under $1.
+
+A handful of `temperature` / model-name corrections also landed in the LLM factory — see the troubleshooting table in [README.md](README.md) and [SHIP.md](SHIP.md) for the specific gotchas.
+
+---
+
+## 3. Original free-tier stack (the broken plan)
+
+The grid below is **historical** — keep it for the architecture diff, but ignore the "Chat LLM via GitHub Models" row.
 
 | Layer | Free choice | Quota | Notes |
 |---|---|---|---|
-| **Chat LLM (citation-critical)** | **Claude Sonnet 4.6 via GitHub Models** | ~150 RPM, 150k TPM (Copilot Pro tier; lower on free) | Preserves Anthropic Citations API end-to-end |
+| ~~**Chat LLM (citation-critical)**~~ | ~~**Claude Sonnet 4.6 via GitHub Models**~~ | ~~~150 RPM, 150k TPM~~ | ❌ **Broken** — `langchain-anthropic` sends `x-api-key`, GH Models wants `Authorization: Bearer`. Use real `sk-ant-…` instead (§3a). |
 | **Light LLM ops** (rewrite/classify/outline) | **Gemini 2.0 Flash** (Google AI Studio) | 1,500 RPD, 1M TPM | Generous; ~free forever |
 | **Heavy LLM** (artifacts in v2+) | **Gemini 2.5 Pro** (Google AI Studio free) | 50 RPD | Rate-limited but fine for demos |
 | **Embeddings** | **`text-embedding-004`** via Gemini API OR **`BAAI/bge-m3`** local | Gemini: very high free TPM. BGE: unlimited local. | BGE-M3 wins on multilingual + offline; pick one |
@@ -64,20 +89,33 @@ Useful as the reference for "what would this cost if I paid." Source: claude.com
 
 Anthropic's Citations API is the single feature the whole PLAN.md architecture is built around. Gemini doesn't have a true equivalent for *document* citations (its grounding is tied to Google Search). Three viable paths:
 
-### Path A — Claude via GitHub Models *(recommended)*
+### ~~Path A — Claude via GitHub Models~~ ❌ Doesn't work
 
-GitHub Models proxies Anthropic's API for free under your GitHub account. Citations API works because we're hitting the real Anthropic backend.
+We pitched this as the recommended free path. In reality:
+
+- GitHub Models at `https://models.inference.ai.azure.com` is the **Azure AI Inference** dialect, which expects `Authorization: Bearer <PAT>` or an `api-key` header.
+- `langchain-anthropic` always emits `x-api-key: <token>` because it wraps the official `anthropic` Python SDK.
+- The endpoint sees neither expected auth header and returns:
+  ```
+  401 - "No authorization header or api key found in request."
+  ```
+
+Two ways forward:
+
+1. **Recommended now**: use the **real Anthropic API** with a `sk-ant-…` key. Sign up at console.anthropic.com → $5 free credit on signup → covers all of a demo with room to spare. Unset `ANTHROPIC_BASE_URL` (so the SDK defaults to `https://api.anthropic.com`).
+2. **If you must use GH Models**: switch from `langchain-anthropic` to `langchain-openai`'s `ChatOpenAI` pointing at `https://models.github.ai/inference` (OpenAI-compat shape, accepts Bearer). You lose Anthropic's Citations API in the process, which defeats the whole architecture. Not recommended.
 
 ```python
-from langchain_anthropic import ChatAnthropic
-model = ChatAnthropic(
+# What actually works in llm.py today:
+ChatAnthropic(
     model="claude-sonnet-4-6",
-    anthropic_api_url="https://models.inference.ai.azure.com",  # GH Models endpoint
-    anthropic_api_key=os.environ["GITHUB_TOKEN"],
+    api_key=os.environ["ANTHROPIC_API_KEY"],   # sk-ant-...
+    max_tokens=4096,
+    # NO base_url, NO temperature (Opus 4+ rejects it).
 )
 ```
 
-- ✅ Citations API works
+Original (broken) path details below for reference:
 - ✅ $0
 - ⚠️ Rate-limited (varies by your GH plan; free is ~10 RPM, Copilot Pro ~150 RPM)
 - ⚠️ TOS: "for evaluation and experimentation" — fine for a university project, not for a commercial product
@@ -229,15 +267,18 @@ The whole switch is config + a credit card, because the architecture didn't chan
 
 ---
 
-## 11. Decision summary
+## 11. Final decision (updated after the build)
 
-For your university project, I'd commit to:
+What v1 actually ships on — replacing the original plan in §11:
 
-1. **GH Models for Claude chat** + **Gemini fallback** (Path A/hybrid).
-2. **BGE-M3 local embeddings** (no quota anxiety; covers offline demos).
-3. **Voyage rerank-2.5** (the one paid-API we keep — it's genuinely free for our volume).
-4. **Edge TTS** for Audio Overview when you build v3.
-5. **Local docker-compose** + **Cloudflare Tunnel for demos**. No paid hosting at all unless your professor specifically wants always-on.
-6. **$10 one-time Anthropic top-up** in your wallet for demo day insurance.
+1. **Real Anthropic API (`sk-ant-…`)** for chat and any heavy-mode summary. $5 signup credit, no card on file required. Citations API works end-to-end. Do not set `ANTHROPIC_BASE_URL`.
+2. **Gemini 2.0 Flash** (`GOOGLE_API_KEY` from aistudio.google.com) for outline + cheap-tier summary. Free, 1500 RPD.
+3. **`BAAI/bge-small-en-v1.5` (384-dim) via fastembed**, local. The original plan said BGE-M3 (1024-dim); we downgraded to BGE-small to keep the Windows demo machine snappy. **`EMBEDDING_DIM=384`** must be set in `.env` to match the schema migration.
+4. **Voyage rerank-2.5** (optional, 200M tok/mo free) — used when `VOYAGE_API_KEY` is set, falls back to top-K hybrid otherwise.
+5. **`PROVIDER_TIER=prod`** in `.env` — routes the summarizer to Opus via Anthropic (not Gemini 2.5 Pro, which has a 50 RPD cap that hit during testing).
+6. **Local docker-compose** for Postgres / Redis / MinIO. No paid hosting.
+7. **Total runtime cost for the demo: well under $1.** The $5 Anthropic credit is the only money on the table.
+
+Total deviation from the original plan: 1 broken provider path (GH Models), 1 model swap (Opus instead of Gemini 2.5 Pro on free tier), 1 embedding-dim downgrade (384 instead of 1024). Architecture unchanged.
 
 Cost: **$0/month, ~$10 total over the semester.**

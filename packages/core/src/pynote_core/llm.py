@@ -22,10 +22,14 @@ if TYPE_CHECKING:
 
 
 def _anthropic_kwargs(settings: Settings) -> dict[str, object]:
-    """Common kwargs for ChatAnthropic — works against direct API or GH Models proxy."""
+    """Common kwargs for ChatAnthropic — works against direct API or GH Models proxy.
+
+    `temperature` is intentionally omitted: Anthropic deprecated it for Opus 4+
+    reasoning models (returns 400 `temperature is deprecated for this model`).
+    Sonnet/Haiku still accept it but defaulting it costs us nothing.
+    """
     kw: dict[str, object] = {
         "api_key": settings.anthropic_api_key or "missing",
-        "temperature": 0.2,
         "max_tokens": 4096,
     }
     if settings.anthropic_base_url:

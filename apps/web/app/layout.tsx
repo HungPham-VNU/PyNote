@@ -3,7 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PyNote",
+  title: "PyNote — Research Workspace",
   description: "A NotebookLM-style RAG application.",
 };
 
@@ -13,9 +13,49 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ClerkProvider>
-      <html lang="en">
-        <body className="min-h-screen bg-neutral-50 text-neutral-900 antialiased">
+    <ClerkProvider
+      appearance={{
+        variables: {
+          colorBackground: "#1c1b1c",
+          colorText: "#e5e2e3",
+          colorTextSecondary: "#c2c6d6",
+          colorPrimary: "#4d8eff",
+          colorTextOnPrimaryBackground: "#00285d",
+          colorInputBackground: "#201f20",
+          colorInputText: "#e5e2e3",
+          colorNeutral: "#e5e2e3",
+          colorDanger: "#f87171",
+          colorSuccess: "#4edea3",
+          colorWarning: "#fcd34d",
+          borderRadius: "0.5rem",
+        },
+        elements: {
+          rootBox: { colorScheme: "dark" },
+          card: { backgroundColor: "#1c1b1c", border: "1px solid #2a2a2b" },
+          headerTitle: { color: "#e5e2e3" },
+          headerSubtitle: { color: "#c2c6d6" },
+          formFieldLabel: { color: "#e5e2e3" },
+          formFieldHintText: { color: "#8c909f" },
+          formFieldInput: { color: "#e5e2e3", backgroundColor: "#201f20" },
+          formFieldInputShowPasswordButton: { color: "#c2c6d6" },
+          formButtonPrimary: { color: "#00285d", fontWeight: 600 },
+          socialButtonsBlockButton: {
+            borderColor: "#424754",
+            color: "#e5e2e3",
+          },
+          socialButtonsBlockButtonText: { color: "#e5e2e3" },
+          dividerLine: { backgroundColor: "#2a2a2b" },
+          dividerText: { color: "#8c909f" },
+          footerActionText: { color: "#c2c6d6" },
+          footerActionLink: { color: "#4d8eff" },
+          identityPreviewText: { color: "#e5e2e3" },
+          identityPreviewEditButton: { color: "#adc6ff" },
+          formResendCodeLink: { color: "#adc6ff" },
+        },
+      }}
+    >
+      <html lang="en" className="dark">
+        <body className="min-h-screen bg-[#131314] text-[#e5e2e3] antialiased">
           {children}
         </body>
       </html>
