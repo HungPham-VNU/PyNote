@@ -12,7 +12,7 @@ export function PdfViewer({ sourceId, initialPage, citedText }: Props) {
       <h3 className="text-sm font-semibold text-neutral-800">Citation</h3>
       {citedText && (
         <blockquote className="text-sm text-neutral-600 border-l-4 border-neutral-300 pl-3 italic my-2">
-          "{citedText}"
+          &quot;{citedText}&quot;
         </blockquote>
       )}
       {initialPage && (
