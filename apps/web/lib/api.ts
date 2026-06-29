@@ -144,3 +144,61 @@ export async function generateNotebookSummary(
     method: "POST",
   });
 }
+
+// ---- Mind map (M12) --------------------------------------------------------
+
+export type MindMapCitation = {
+  source_id: string;
+  source_part_id: string;
+  source_title: string | null;
+  page: number | null;
+  quote: string;
+  roundtrip_ok: boolean;
+};
+
+export type MindMapNode = {
+  id: string;
+  label: string;
+  kind: string;
+  citations: MindMapCitation[];
+};
+
+export type MindMapEdge = {
+  from: string;
+  to: string;
+  label: string;
+  citations: MindMapCitation[];
+};
+
+export type MindMapStatus = "generating" | "ready" | "failed";
+
+export type MindMap = {
+  status: MindMapStatus;
+  generated_at: string | null;
+  error: string | null;
+  nodes: MindMapNode[];
+  edges: MindMapEdge[];
+};
+
+export async function getMindMap(
+  token: string | null,
+  notebookId: string,
+): Promise<MindMap | null> {
+  const res = await fetch(`${API_BASE}/api/v1/notebooks/${notebookId}/mind-map`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`mind-map HTTP ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+export async function generateMindMap(
+  token: string | null,
+  notebookId: string,
+): Promise<MindMap> {
+  return request<MindMap>(`/api/v1/notebooks/${notebookId}/mind-map`, {
+    token,
+    method: "POST",
+  });
+}

@@ -12,6 +12,7 @@ from pynote_core.settings import get_settings
 from pynote_core.tracing import configure_tracing
 from pynote_worker.tasks import (
     embed_source,
+    generate_mind_map_task,
     noop_task,
     outline_source,
     parse_source,
@@ -41,6 +42,7 @@ class WorkerSettings:
         parse_source,
         embed_source,
         outline_source,
+        generate_mind_map_task,
     ]
     on_startup: ClassVar = startup
     on_shutdown: ClassVar = shutdown

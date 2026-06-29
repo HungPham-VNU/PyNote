@@ -25,7 +25,8 @@ from pynote_core.chunker import chunk_text
 from pynote_core.db import async_session_scope
 from pynote_core.embeddings import get_embedder
 from pynote_core.llm import get_chat_model
-from pynote_core.models import Chunk, Source, SourcePart
+from pynote_core.mindmap import generate_mind_map
+from pynote_core.models import Chunk, Notebook, Source, SourcePart
 from pynote_core.outliner import generate_outline
 from pynote_core.parsers import ParsedPart
 from pynote_core.parsers import parse as parse_source_file
@@ -345,6 +346,76 @@ async def outline_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
         "n_entities": len(outline.key_entities),
         "n_questions": len(outline.suggested_questions),
     }
+
+
+async def generate_mind_map_task(ctx: dict[str, Any], notebook_id: str) -> dict[str, Any]:
+    """Generate a mind map (M12) and persist on `notebook.settings["mind_map"]`.
+
+    Status lives inside the same key so the API can poll it: `generating` is
+    written synchronously by the route before this job is enqueued, this task
+    overwrites it with `ready` + the map, or `failed` + an error string.
+    """
+    nbid = UUID(notebook_id)
+    started = time.perf_counter()
+    log.info("generate_mind_map_task[%s]: start", nbid)
+
+    async with async_session_scope() as db:
+        rows = await db.execute(
+            select(SourcePart, Source.title)
+            .join(Source, Source.id == SourcePart.source_id)
+            .where(Source.notebook_id == nbid, Source.status == "ready")
+            .order_by(Source.created_at, SourcePart.ordinal),
+        )
+        parts = [(part, title) for part, title in rows.all()]
+
+    if not parts:
+        log.warning("generate_mind_map_task[%s]: no ready sources", nbid)
+        async with async_session_scope() as db:
+            notebook = await db.get(Notebook, nbid)
+            if notebook is not None:
+                notebook.settings = {
+                    **(notebook.settings or {}),
+                    "mind_map": {"status": "failed", "error": "No ready sources."},
+                }
+        return {"ok": False, "reason": "no-ready-sources"}
+
+    try:
+        mind_map = await generate_mind_map(parts)
+    except Exception as e:
+        log.exception("generate_mind_map_task[%s]: generation failed", nbid)
+        async with async_session_scope() as db:
+            notebook = await db.get(Notebook, nbid)
+            if notebook is not None:
+                notebook.settings = {
+                    **(notebook.settings or {}),
+                    "mind_map": {
+                        "status": "failed",
+                        "error": f"{type(e).__name__}: {str(e)[:200]}",
+                    },
+                }
+        return {"ok": False, "reason": "generation-failed", "error": str(e)[:200]}
+
+    payload = {
+        "status": "ready",
+        "generated_at": datetime.now(UTC).isoformat(),
+        **mind_map.model_dump(mode="json", by_alias=True),
+    }
+    async with async_session_scope() as db:
+        notebook = await db.get(Notebook, nbid)
+        if notebook is None:
+            log.warning("generate_mind_map_task[%s]: notebook vanished", nbid)
+            return {"ok": False, "reason": "notebook-vanished"}
+        notebook.settings = {**(notebook.settings or {}), "mind_map": payload}
+
+    total_ms = int((time.perf_counter() - started) * 1000)
+    log.info(
+        "generate_mind_map_task[%s]: done — %d nodes, %d edges in %dms",
+        nbid,
+        len(mind_map.nodes),
+        len(mind_map.edges),
+        total_ms,
+    )
+    return {"ok": True, "nodes": len(mind_map.nodes), "edges": len(mind_map.edges)}
 
 
 # ---- internals -------------------------------------------------------------
