@@ -291,7 +291,7 @@ export function MindMapRenderer({
       {!hasMap && mindMap?.status !== "generating" && !loading && (
         <p className="text-xs text-[#8c909f]">
           No mind map yet — generate one to see concepts and relationships across this
-          notebook's sources.
+          notebook&apos;s sources.
         </p>
       )}
     </div>

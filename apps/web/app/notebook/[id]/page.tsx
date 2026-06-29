@@ -8,6 +8,7 @@ import { SourceList } from "@/components/source-list";
 import { ChatPanel } from "@/components/chat-panel";
 import { SuggestedQuestions } from "@/components/suggested-questions";
 import { SummaryButton } from "@/components/summary-button";
+import { MindMapRenderer } from "@/components/MindMapRenderer";
 
 export default async function NotebookPage({
   params,
@@ -112,6 +113,24 @@ export default async function NotebookPage({
               </div>
             </div>
             <SummaryButton
+              notebookId={id}
+              hasReadySource={hasReadySource}
+            />
+          </div>
+
+          {/* Mind map card */}
+          <div className="rounded-2xl border border-[#424754] bg-[#1c1b1c] p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-[#e5e2e3]">
+                  Mind Map
+                </h2>
+                <p className="text-xs text-[#c2c6d6]">
+                  Concepts and relationships across all ready sources, grounded in citations.
+                </p>
+              </div>
+            </div>
+            <MindMapRenderer
               notebookId={id}
               hasReadySource={hasReadySource}
             />
