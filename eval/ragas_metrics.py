@@ -5,10 +5,13 @@ it as an *optional* extra: callers try to import; if it's missing, the
 eval falls back to the lite metrics only.
 
 Install with:
-    uv pip install --group eval
+    uv sync --all-packages --group eval
 
-Designed to run with the free-tier `get_cheap_model()` (Gemini Flash) as the
-judge — Ragas calls the judge for each metric per row.
+Free-tier setup (no OpenAI key required):
+- Judge LLM:    Gemini Flash via `get_cheap_model()` — one call per metric per row.
+- Embeddings:   local BGE-small via `_BGEEmbeddingsForRagas` — used by
+                `answer_relevancy` (cosine sim between Q and reconstructed-Q).
+                Without this adapter Ragas falls back to OpenAIEmbeddings.
 """
 
 from __future__ import annotations
@@ -38,6 +41,41 @@ def is_available() -> bool:
         return False
 
 
+class _BGEEmbeddingsForRagas:
+    """LangChain `Embeddings`-compatible adapter over our local fastembed BGE.
+
+    Ragas' `answer_relevancy` metric needs an embedding model (cosine sim
+    between the original question and a question generated from the answer).
+    Without one supplied, ragas falls back to OpenAIEmbeddings — which fails
+    if OPENAI_API_KEY isn't set. We point it at the same local model the rest
+    of the app uses, keeping the eval free-tier-friendly.
+    """
+
+    def __init__(self) -> None:
+        from fastembed import TextEmbedding
+
+        from pynote_core.settings import get_settings
+
+        settings = get_settings()
+        self._model = TextEmbedding(model_name=settings.embedding_model)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [list(map(float, v)) for v in self._model.embed(texts)]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        import asyncio
+
+        return await asyncio.to_thread(self.embed_documents, texts)
+
+    async def aembed_query(self, text: str) -> list[float]:
+        import asyncio
+
+        return await asyncio.to_thread(self.embed_query, text)
+
+
 async def score_with_ragas(
     rows: Sequence[dict],
 ) -> list[RagasScores]:
@@ -47,15 +85,18 @@ async def score_with_ragas(
     `context_precision`/`context_recall` require `reference`; absent rows
     return `None` for those metrics.
 
-    Uses the cheap LLM as judge (Gemini Flash on free tier).
+    Uses the cheap LLM as judge (Gemini Flash on free tier) and the local
+    BGE-small embedder for similarity-based metrics — no OpenAI key required.
     """
     from ragas import EvaluationDataset, evaluate
+    from ragas.embeddings import LangchainEmbeddingsWrapper
     from ragas.llms import LangchainLLMWrapper
     from ragas.metrics import answer_relevancy, faithfulness
 
     from pynote_core.llm import get_cheap_model
 
     judge = LangchainLLMWrapper(get_cheap_model())
+    embeddings = LangchainEmbeddingsWrapper(_BGEEmbeddingsForRagas())
 
     samples = [
         {
@@ -77,7 +118,7 @@ async def score_with_ragas(
         metrics.extend([context_precision, context_recall])
 
     dataset = EvaluationDataset.from_list(samples)
-    result = evaluate(dataset, metrics=metrics, llm=judge)
+    result = evaluate(dataset, metrics=metrics, llm=judge, embeddings=embeddings)
     df = result.to_pandas()
 
     out: list[RagasScores] = []
