@@ -21,10 +21,15 @@ dev = [
   "types-requests",
 ]
 # Optional — Ragas-based ship-gate metrics. Install with:
-#   uv pip install --group eval
+#   uv sync --all-packages --group eval
+#
+# `langchain-community<0.4` is required because ragas 0.4.x still imports
+# `langchain_community.chat_models.vertexai`, which was removed in 0.4.0
+# (Vertex moved to its own `langchain-google-vertexai` package).
 eval = [
   "ragas>=0.2",
   "datasets>=3",
+  "langchain-community<0.4",
 ]
 
 [tool.uv.workspace]

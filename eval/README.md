@@ -93,3 +93,96 @@ are signal — usually:
 - **Low fidelity, high citation count** → Claude is over-citing; tighten the system prompt or drop `top_k`.
 - **Low fidelity, low citation count** → retrieval missed the answer source; raise `candidate_k`, check the rerank.
 - **No citations at all** → forgot `citations.enabled=True` on the search_result blocks (don't — it's hard-coded in `pack_search_results`).
+
+---
+
+## M7 ship-gate eval (`eval/run.py`)
+
+M3 proves the citation contract holds for one query. **M7 turns that into a
+gate**: a JSONL of questions, three lite metrics (citation_grounding,
+faithfulness_lite, answer_relevancy_lite) with fixed thresholds, and an
+optional Ragas pass for semantic-grade verdicts.
+
+### Run the lite gate (fast, $0)
+
+```bash
+uv run python -m eval.run \
+  --notebook $NB \
+  --file eval/golden/sample.jsonl \
+  > eval/results/m7-$(date +%Y%m%d-%H%M%S).jsonl
+```
+
+Stdout is one JSONL row per question + a trailing `_summary`. Stderr shows
+progress and the final verdict line:
+
+```
+GATE: PASS  cg=94%  fl=71%  ar=38%
+```
+
+Gate thresholds (from `eval/metrics.py`):
+- `citation_grounding ≥ 0.90` — fraction of citations whose char-offsets
+  round-trip to the chunk text.
+- `faithfulness_lite ≥ 0.60` — answer tokens overlap with retrieved contexts.
+- `answer_relevancy_lite ≥ 0.25` — answer tokens overlap with the question.
+
+The lite metrics are crude (word-overlap, no LLM). They're a sanity floor —
+the **citation_grounding** number is the one that actually matters, because
+it's deterministic and char-exact.
+
+### Add Ragas for semantic scoring (slow, costs judge tokens)
+
+```bash
+# One-time: install the eval dep group
+uv sync --all-packages --group eval
+
+# Then add the flag
+uv run python -m eval.run \
+  --notebook $NB \
+  --file eval/golden/sample.jsonl \
+  --with-ragas \
+  > eval/results/m7-ragas-$(date +%Y%m%d-%H%M%S).jsonl
+```
+
+Each row gets a `"ragas": {...}` block with four scores. Setup is wired for
+free tier:
+
+- **Judge LLM**: `get_cheap_model()` (Gemini Flash). One call per metric per
+  row — ~4-12 calls per question depending on which metrics apply.
+- **Embeddings**: local BGE-small via `_BGEEmbeddingsForRagas` (in
+  `eval/ragas_metrics.py`). Needed for `answer_relevancy`; without it Ragas
+  silently falls back to OpenAIEmbeddings and dies if `OPENAI_API_KEY` is
+  unset.
+
+### Metric semantics — what each number tells you
+
+| Metric | Failure pattern caught |
+|---|---|
+| `citation_grounding` | "Citation says it's at offset X but it isn't" — drift, hallucinated quotes |
+| `Ragas faithfulness` | "Answer says claim C but C isn't in any retrieved chunk" — semantic hallucination |
+| `Ragas answer_relevancy` | "Answer doesn't address the question" — off-topic responses |
+| `Ragas context_precision` | "Top-K has chunks that aren't relevant to the question" — bad retrieval |
+| `Ragas context_recall` | "The chunks miss information from the reference answer" — under-retrieved |
+
+`context_precision` and `context_recall` both need a `reference` field on
+each question (the expected answer). The current `golden/sample.jsonl` has
+no references, so those two stay `None` unless you enrich the file:
+
+```jsonl
+{"q": "What is the main topic?", "reference": "...the expected answer..."}
+```
+
+### When to run which
+
+| Loop | Use | Why |
+|---|---|---|
+| Tuning `top_k` / RRF weights | Lite metrics (no `--with-ragas`) | Free, deterministic, <1s/question |
+| Pre-PR sanity check | Lite metrics | Same as above, runs in CI |
+| Pre-ship / nightly | `--with-ragas` | Catches semantic regressions the lite metrics can't |
+| Debugging one bad row | Lite metrics + open the row in `eval/results/*.jsonl` | `ungrounded` field lists citations that failed roundtrip |
+
+### Pinned dep note
+
+`pyproject.toml` pins `langchain-community<0.4` in the `eval` group. Ragas
+0.4.3 still imports `langchain_community.chat_models.vertexai`, which moved
+to its own package in lc-community 0.4.0. Remove the pin when ragas itself
+ships a fix.
