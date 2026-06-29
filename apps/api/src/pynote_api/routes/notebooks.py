@@ -4,8 +4,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from pynote_api.auth import Principal
 from pynote_api.deps import current_principal, get_db
@@ -21,28 +22,50 @@ class NotebookCreate(BaseModel):
 class NotebookOut(BaseModel):
     id: UUID
     title: str
-    org_id: str
+    org_id: str | None
     owner_user_id: str
 
     model_config = {"from_attributes": True}
 
 
+def _scope_notebooks(stmt: Select, principal: Principal) -> Select:
+    """Restrict a Notebook select to rows the principal can see.
+
+    - Solo user (no org): only notebooks they own that are not in any org.
+    - Org user: notebooks in the active org, plus their own solo notebooks
+      (so switching into an org doesn't hide what you created beforehand).
+    """
+    if principal.org_id is None:
+        return stmt.where(
+            Notebook.owner_user_id == principal.user_id,
+            Notebook.org_id.is_(None),
+        )
+    return stmt.where(
+        or_(
+            Notebook.org_id == principal.org_id,
+            Notebook.owner_user_id == principal.user_id,
+        )
+    )
+
+
 async def _ensure_identity(db: AsyncSession, principal: Principal) -> None:
-    """Upsert minimal Org/User/Membership rows so FK constraints hold.
+    """Upsert minimal User (and Org/Membership when scoped) rows for FKs.
 
     Clerk owns identity; we just mirror enough to scope tenant rows.
     """
-    org = await db.get(Org, principal.org_id)
-    if org is None:
-        db.add(Org(id=principal.org_id, name=principal.org_id))
     user = await db.get(User, principal.user_id)
     if user is None:
         db.add(User(id=principal.user_id, email=principal.email or f"{principal.user_id}@unknown"))
+    if principal.org_id is not None:
+        org = await db.get(Org, principal.org_id)
+        if org is None:
+            db.add(Org(id=principal.org_id, name=principal.org_id))
     await db.flush()
-    membership = await db.get(Membership, (principal.user_id, principal.org_id))
-    if membership is None:
-        db.add(Membership(user_id=principal.user_id, org_id=principal.org_id, role="member"))
-        await db.flush()
+    if principal.org_id is not None:
+        membership = await db.get(Membership, (principal.user_id, principal.org_id))
+        if membership is None:
+            db.add(Membership(user_id=principal.user_id, org_id=principal.org_id, role="member"))
+            await db.flush()
 
 
 @router.get("/notebooks", response_model=list[NotebookOut])
@@ -50,11 +73,10 @@ async def list_notebooks(
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
 ) -> list[Notebook]:
-    result = await db.execute(
-        select(Notebook)
-        .where(Notebook.org_id == principal.org_id)
-        .order_by(Notebook.created_at.desc()),
+    stmt = _scope_notebooks(select(Notebook), principal).order_by(
+        Notebook.created_at.desc()
     )
+    result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
@@ -85,8 +107,9 @@ async def get_notebook(
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
 ) -> Notebook:
-    notebook = await db.get(Notebook, notebook_id)
-    if notebook is None or notebook.org_id != principal.org_id:
+    stmt = _scope_notebooks(select(Notebook).where(Notebook.id == notebook_id), principal)
+    notebook = (await db.execute(stmt)).scalar_one_or_none()
+    if notebook is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Notebook not found.")
     return notebook
 
@@ -97,7 +120,8 @@ async def delete_notebook(
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    notebook = await db.get(Notebook, notebook_id)
-    if notebook is None or notebook.org_id != principal.org_id:
+    stmt = _scope_notebooks(select(Notebook).where(Notebook.id == notebook_id), principal)
+    notebook = (await db.execute(stmt)).scalar_one_or_none()
+    if notebook is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Notebook not found.")
     await db.delete(notebook)

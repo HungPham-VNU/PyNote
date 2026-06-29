@@ -1,10 +1,12 @@
 """Clerk JWT verification.
 
 Production path: fetches Clerk's JWKS, caches it, validates JWTs from the
-`Authorization: Bearer ...` header. Extracts `sub` (user_id) and `org_id`.
+`Authorization: Bearer ...` header. Extracts `sub` (user_id) and `org_id`
+(optional — users without a Clerk org are treated as solo users).
 
-Dev path (when CLERK_JWKS_URL unset): accepts `X-Dev-User` and `X-Dev-Org`
-headers verbatim. Lets you build M1/M2 without setting up Clerk.
+Dev path (when CLERK_JWKS_URL unset): accepts `X-Dev-User` (required) and
+`X-Dev-Org` (optional) headers verbatim. Lets you build features without
+setting up Clerk.
 """
 
 from dataclasses import dataclass
@@ -19,10 +21,10 @@ from pynote_core.settings import Settings, get_settings
 
 @dataclass(frozen=True)
 class Principal:
-    """Authenticated caller identity."""
+    """Authenticated caller identity. `org_id` is None for solo users."""
 
     user_id: str
-    org_id: str
+    org_id: str | None = None
     email: str | None = None
 
 
@@ -59,12 +61,10 @@ def _verify_clerk_jwt(token: str, settings: Settings) -> Principal:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid token: {e}") from e
 
     user_id = claims.get("sub")
-    org_id = claims.get("org_id")
-    if not user_id or not org_id:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            "Token is missing user or org. Switch to an organization in the web app.",
-        )
+    if not user_id:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token is missing user.")
+    # org_id is optional — Clerk v2 session tokens nest it under `o.id`.
+    org_id = claims.get("org_id") or (claims.get("o") or {}).get("id")
     return Principal(user_id=user_id, org_id=org_id, email=claims.get("email"))
 
 
@@ -78,10 +78,10 @@ async def current_principal(
     """FastAPI dep — returns the authenticated principal or raises 401."""
     # Dev shortcut: when Clerk isn't configured, trust X-Dev-* headers.
     if not settings.clerk_jwks_url:
-        if not x_dev_user or not x_dev_org:
+        if not x_dev_user:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "Dev auth requires X-Dev-User and X-Dev-Org headers (Clerk is not configured).",
+                "Dev auth requires X-Dev-User header (Clerk is not configured).",
             )
         return Principal(user_id=x_dev_user, org_id=x_dev_org)
 

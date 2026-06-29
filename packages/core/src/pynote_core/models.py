@@ -98,10 +98,15 @@ class Membership(SQLModel, table=True):
 
 class Notebook(SQLModel, table=True):
     __tablename__ = "notebook"
-    __table_args__ = (Index("ix_notebook_org_created", "org_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_notebook_org_created", "org_id", "created_at"),
+        Index("ix_notebook_owner_created", "owner_user_id", "created_at"),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    org_id: str = Field(foreign_key="org.id", max_length=64, index=True)
+    org_id: str | None = Field(
+        default=None, foreign_key="org.id", max_length=64, index=True
+    )
     owner_user_id: str = Field(foreign_key="user.id", max_length=64, index=True)
     title: str = Field(max_length=255)
     settings: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
@@ -117,7 +122,7 @@ class Notebook(SQLModel, table=True):
         sa_column_kwargs=_ts_kwargs(on_update=True),
     )
 
-    org: Org = Relationship(back_populates="notebooks")
+    org: Org | None = Relationship(back_populates="notebooks")
 
 
 # ---- Job (arq task envelope) -----------------------------------------------
