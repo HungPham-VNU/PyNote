@@ -64,20 +64,16 @@ class MindMapOut(BaseModel):
 
 
 def _mind_map_from_settings(settings: dict[str, Any]) -> MindMapOut | None:
+    """Pull the stored mind map out of `notebook.settings`, validating shape.
+
+    Stored JSON already uses by-alias keys (`from`/`to` on edges), matching
+    what `MindMapOut` expects on the wire — `model_validate` does the coercion.
+    """
     raw = settings.get("mind_map") if isinstance(settings, dict) else None
     if not isinstance(raw, dict):
         return None
-    edges = [
-        {**e, "from_": e.get("from", e.get("from_", ""))} for e in (raw.get("edges") or [])
-    ]
     try:
-        return MindMapOut(
-            status=raw.get("status", "failed"),
-            generated_at=raw.get("generated_at"),
-            error=raw.get("error"),
-            nodes=raw.get("nodes") or [],
-            edges=edges,
-        )
+        return MindMapOut.model_validate(raw)
     except Exception:
         return None
 

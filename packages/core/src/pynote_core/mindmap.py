@@ -17,7 +17,7 @@ Persisted on `notebook.settings["mind_map"]` — no new table, same pattern as
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID  # noqa: TC003 — needed at runtime for Pydantic field resolution
 
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
@@ -111,7 +111,7 @@ class EdgeExtractionResult(BaseModel):
 
 
 class _Block:
-    __slots__ = ("source_id", "source_part_id", "source_title", "page", "text")
+    __slots__ = ("page", "source_id", "source_part_id", "source_title", "text")
 
     def __init__(
         self,
