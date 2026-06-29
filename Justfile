@@ -75,9 +75,10 @@ dev:
 api:
     uv run python -m pynote_api
 
-# Just the worker.
+# Just the worker. Uses the programmatic entrypoint so the Windows
+# SelectorEventLoop policy is set before arq creates its loop.
 worker:
-    uv run arq pynote_worker.main.WorkerSettings
+    uv run python -m pynote_worker
 
 # Just the web.
 web:

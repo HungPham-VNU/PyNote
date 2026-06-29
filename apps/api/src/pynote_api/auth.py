@@ -63,8 +63,14 @@ def _verify_clerk_jwt(token: str, settings: Settings) -> Principal:
     user_id = claims.get("sub")
     if not user_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token is missing user.")
-    # org_id is optional — Clerk v2 session tokens nest it under `o.id`.
-    org_id = claims.get("org_id") or (claims.get("o") or {}).get("id")
+    # org_id is optional (solo users have no Clerk org). Clerk v2 session tokens
+    # nest the active org under `o.id`; older/templated tokens expose `org_id`
+    # at the top level. Accept either; leave None for solo users.
+    org_id = claims.get("org_id")
+    if not org_id:
+        org_claim = claims.get("o")
+        if isinstance(org_claim, dict):
+            org_id = org_claim.get("id")
     return Principal(user_id=user_id, org_id=org_id, email=claims.get("email"))
 
 

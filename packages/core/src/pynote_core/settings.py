@@ -52,8 +52,13 @@ class Settings(BaseSettings):
     gemini_model_heavy: str = "gemini-2.5-pro"
 
     # ---- Embeddings ----
-    embedding_provider: Literal["bge-m3-local", "voyage", "gemini"] = "bge-m3-local"
-    embedding_dim: int = 1024
+    # Default in M2: bge-small-local via fastembed (~130MB ONNX, 384-dim, fast CPU).
+    # Swap to bge-m3-local (~2GB, 1024-dim) or voyage (1024-dim) once schema migrated.
+    embedding_provider: Literal["bge-small-local", "bge-m3-local", "voyage", "gemini"] = (
+        "bge-small-local"
+    )
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_dim: int = 384
     voyage_api_key: str | None = None
 
     # ---- Rerank ----

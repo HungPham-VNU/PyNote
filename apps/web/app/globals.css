@@ -1,11 +1,136 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+@plugin "@tailwindcss/typography";
 
+/* Inter + JetBrains Mono — matches the Stitch "AI Research Workspace" design.
+ * Loaded via the link in app/layout.tsx (Google Fonts). */
 @theme {
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Material 3 dark palette — Stitch design tokens. */
+  --color-bg: #131314;
+  --color-surface: #131314;
+  --color-surface-low: #1c1b1c;
+  --color-surface: #201f20;
+  --color-surface-high: #2a2a2b;
+  --color-surface-highest: #353436;
+  --color-on-surface: #e5e2e3;
+  --color-on-surface-variant: #c2c6d6;
+  --color-outline: #8c909f;
+  --color-outline-variant: #424754;
+  --color-primary: #adc6ff;
+  --color-primary-container: #4d8eff;
+  --color-on-primary-container: #00285d;
+  --color-secondary: #ddb7ff;
+  --color-tertiary: #4edea3;
+  --color-citation: #fcd34d;
+}
+
+html {
+  color-scheme: dark;
+  background-color: #131314;
 }
 
 body {
   font-family: var(--font-sans);
+  background-color: #131314;
+  color: #e5e2e3;
+}
+
+/* M5: citation highlight overlay rendered by the CSS Custom Highlight API. */
+::highlight(pynote-citation) {
+  background-color: rgba(252, 211, 77, 0.55);
+  color: inherit;
+}
+
+/* Clerk dark-theme corrections.
+ * Clerk's `appearance.variables` doesn't reach every text node (placeholders,
+ * "Optional" inline hints, password-toggle icon). Force them to light colors
+ * via the stable `.cl-*` class prefix. */
+.cl-rootBox {
+  color-scheme: dark;
+}
+.cl-formFieldInput::placeholder {
+  color: #8c909f !important;
+  opacity: 1;
+}
+.cl-formFieldLabel,
+.cl-formFieldLabelRow,
+.cl-formFieldLabelRow * {
+  color: #e5e2e3 !important;
+}
+.cl-formFieldLabel__optional,
+.cl-formFieldLabelRow__formFieldLabelRow > span:last-child {
+  color: #8c909f !important;
+}
+.cl-formFieldHintText,
+.cl-formFieldErrorText,
+.cl-dividerText,
+.cl-footerActionText {
+  color: #c2c6d6 !important;
+}
+.cl-formFieldInput {
+  color: #e5e2e3 !important;
+  background-color: #201f20 !important;
+  border-color: #424754 !important;
+}
+.cl-formFieldInput:focus {
+  border-color: #4d8eff !important;
+  box-shadow: 0 0 0 3px rgba(77, 142, 255, 0.2) !important;
+}
+.cl-formButtonPrimary {
+  color: #00285d !important;
+  background-color: #4d8eff !important;
+}
+.cl-formButtonPrimary:hover {
+  background-color: #adc6ff !important;
+}
+.cl-socialButtonsBlockButton {
+  border-color: #424754 !important;
+  background-color: #201f20 !important;
+}
+.cl-socialButtonsBlockButtonText,
+.cl-socialButtonsBlockButton__text {
+  color: #e5e2e3 !important;
+}
+.cl-formFieldInputShowPasswordButton {
+  color: #c2c6d6 !important;
+}
+.cl-formFieldInputShowPasswordButton:hover {
+  color: #e5e2e3 !important;
+}
+.cl-headerTitle {
+  color: #e5e2e3 !important;
+}
+.cl-headerSubtitle {
+  color: #c2c6d6 !important;
+}
+.cl-footerActionLink {
+  color: #4d8eff !important;
+}
+.cl-footerActionLink:hover {
+  color: #adc6ff !important;
+}
+
+/* Scrollbar polish for dark theme. */
+* {
+  scrollbar-color: #424754 #1c1b1c;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: #1c1b1c;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: #424754;
+  border-radius: 6px;
+  border: 2px solid #1c1b1c;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #5a5e6b;
 }

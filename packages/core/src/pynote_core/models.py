@@ -8,8 +8,12 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Column, DateTime, Index, String, func
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import JSON, Column, DateTime, Index, String, Text, func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlmodel import Field, Relationship, SQLModel
+
+from pynote_core.settings import get_settings
 
 
 def _utcnow() -> datetime:
@@ -123,6 +127,117 @@ class Notebook(SQLModel, table=True):
     )
 
     org: Org | None = Relationship(back_populates="notebooks")
+    sources: list["Source"] = Relationship(back_populates="notebook")
+
+
+# ---- Source + parts (M1) ---------------------------------------------------
+#
+# A Source is one uploaded/linked item inside a notebook (PDF in M1; DOCX/URL/
+# YouTube/audio/image/note land in M8/M9). SourceParts are the loader's raw
+# units — for PDFs, one row per page.
+
+
+class Source(SQLModel, table=True):
+    __tablename__ = "source"
+    __table_args__ = (Index("ix_source_notebook_created", "notebook_id", "created_at"),)
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    notebook_id: UUID = Field(foreign_key="notebook.id", index=True)
+    kind: str = Field(max_length=16)  # pdf | docx | url | youtube | audio | image | note
+    status: str = Field(default="pending", sa_column=Column(String(16), index=True))
+    # pending → uploading → parsing → parsed → embedding → ready  (failed on error)
+    title: str = Field(max_length=512)
+    bytes_uri: str | None = Field(default=None, max_length=1024)  # s3://bucket/key
+    byte_size: int | None = Field(default=None)
+    content_hash: str | None = Field(default=None, max_length=64, index=True)  # sha256 hex
+    error: str | None = Field(default=None)
+    meta: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+    created_at: datetime = Field(
+        default_factory=_utcnow,
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs=_ts_kwargs(),
+    )
+    updated_at: datetime = Field(
+        default_factory=_utcnow,
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs=_ts_kwargs(on_update=True),
+    )
+
+    notebook: Notebook = Relationship(back_populates="sources")
+    parts: list["SourcePart"] = Relationship(
+        back_populates="source",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "SourcePart.ordinal"},
+    )
+
+
+class SourcePart(SQLModel, table=True):
+    __tablename__ = "source_part"
+    __table_args__ = (Index("ix_source_part_source_ordinal", "source_id", "ordinal", unique=True),)
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    source_id: UUID = Field(foreign_key="source.id", index=True)
+    ordinal: int = Field()  # 0-based position within the source
+    page: int | None = Field(default=None)  # 1-based page number for PDFs
+    text: str = Field()  # extracted text; "" allowed for image-only pages
+    bbox: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+
+    created_at: datetime = Field(
+        default_factory=_utcnow,
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs=_ts_kwargs(),
+    )
+
+    source: Source = Relationship(back_populates="parts")
+    chunks: list["Chunk"] = Relationship(
+        back_populates="part",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+# ---- Chunk (M2) ------------------------------------------------------------
+#
+# Retrieval unit. One PDF page (= SourcePart) yields multiple Chunks via the
+# char-based hierarchical chunker. Schema supports both fine (level 0) and
+# section (level 1) chunks — M2 writes only level 0 (M2's chunker is flat;
+# section detection lands when we adopt Docling).
+#
+# `(notebook_id, source_id, source_part_id)` is denormalized so the search
+# query can filter on notebook_id without joins.
+
+
+class Chunk(SQLModel, table=True):
+    __tablename__ = "chunk"
+    __table_args__ = (
+        Index("ix_chunk_notebook_id", "notebook_id"),
+        Index("ix_chunk_source_level", "source_id", "level"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    notebook_id: UUID = Field(foreign_key="notebook.id")
+    source_id: UUID = Field(foreign_key="source.id")
+    source_part_id: UUID = Field(foreign_key="source_part.id")
+    parent_chunk_id: UUID | None = Field(default=None, foreign_key="chunk.id")
+    level: int = Field(default=0)  # 0 = fine, 1 = section, 2 = doc summary
+    ordinal: int = Field()  # position within the source (across all parts)
+    text: str = Field(sa_column=Column(Text, nullable=False))
+    char_start: int = Field()  # offsets into source_part.text — citation contract
+    char_end: int = Field()
+    embedding: list[float] | None = Field(
+        default=None,
+        sa_column=Column(Vector(get_settings().embedding_dim), nullable=True),
+    )
+    # tsv is populated by SQL (to_tsvector); the Python column is a passthrough.
+    tsv: str | None = Field(default=None, sa_column=Column(TSVECTOR, nullable=True))
+    meta: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+    created_at: datetime = Field(
+        default_factory=_utcnow,
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs=_ts_kwargs(),
+    )
+
+    part: SourcePart = Relationship(back_populates="chunks")
 
 
 # ---- Job (arq task envelope) -----------------------------------------------

@@ -1,10 +1,16 @@
 """Programmatic uvicorn entrypoint.
 
 Why this exists: psycopg3's async mode cannot run on asyncio's
-ProactorEventLoop, which is uvicorn's default on Windows. We must install the
-SelectorEventLoop policy *before* the event loop is created — that is impossible
-to do reliably when the app is imported by the `uvicorn ...` CLI (the loop is
-already running by then). Running through this module fixes it.
+ProactorEventLoop, which is Windows' default. We must (a) install the
+SelectorEventLoop policy before *any* loop is created, and (b) stop uvicorn
+from re-setting the policy in its own startup path. We do both by:
+
+  1. Setting WindowsSelectorEventLoopPolicy at process start.
+  2. Building uvicorn.Config with loop="none" so uvicorn does not touch
+     the policy in setup_event_loop().
+  3. Calling Server.serve() through asyncio.run(), which honors our policy.
+
+This bypasses uvicorn.run() / Server.run() entirely on Windows.
 
 Run:
     python -m pynote_api            # or: just api
@@ -12,11 +18,10 @@ Run:
 Env:
     API_HOST   (default 127.0.0.1)
     API_PORT   (default 8000)
-    API_RELOAD (default: 0 on Windows, 1 elsewhere)
-                Note: hot-reload on Windows spawns worker subprocesses that
-                re-create a ProactorEventLoop, so DB calls break under reload.
-                Keep it off on Windows, or set API_RELOAD=1 and accept manual
-                restarts for DB-touching endpoints.
+    API_RELOAD (default 0 on Windows, 1 elsewhere)
+                Note: reload spawns worker subprocesses that re-create a
+                ProactorEventLoop on Windows, breaking DB calls. Keep off
+                on Windows or restart manually after edits.
 """
 
 import asyncio
@@ -25,26 +30,38 @@ import sys
 
 
 def main() -> None:
-    if sys.platform == "win32":
+    is_windows = sys.platform == "win32"
+    if is_windows:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     import uvicorn
 
-    default_reload = "0" if sys.platform == "win32" else "1"
+    default_reload = "0" if is_windows else "1"
     reload = os.environ.get("API_RELOAD", default_reload) == "1"
+    host = os.environ.get("API_HOST", "127.0.0.1")
+    port = int(os.environ.get("API_PORT", "8000"))
 
-    # `loop="none"` keeps uvicorn from replacing the SelectorEventLoop we set
-    # above with its default (ProactorEventLoop on Windows), which would break
-    # psycopg3's async mode. Skip on reload — the reloader spawns workers that
-    # need uvicorn's own loop handling.
-    loop = "none" if sys.platform == "win32" and not reload else "auto"
+    if is_windows and not reload:
+        # Single-process Windows path: own the loop ourselves so uvicorn cannot
+        # reset the policy back to Proactor.
+        config = uvicorn.Config(
+            "pynote_api.main:app",
+            host=host,
+            port=port,
+            loop="none",  # tell uvicorn: do NOT call asyncio_setup
+            reload=False,
+            log_level=os.environ.get("LOG_LEVEL", "info").lower(),
+        )
+        server = uvicorn.Server(config)
+        asyncio.run(server.serve())
+        return
 
+    # Linux / macOS, or Windows-with-reload (caller accepts the consequences).
     uvicorn.run(
         "pynote_api.main:app",
-        host=os.environ.get("API_HOST", "127.0.0.1"),
-        port=int(os.environ.get("API_PORT", "8000")),
+        host=host,
+        port=port,
         reload=reload,
-        loop=loop,
     )
 
 
