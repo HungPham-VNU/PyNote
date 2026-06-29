@@ -5,24 +5,7 @@ import { listNotebooks } from "@/lib/api";
 import { CreateNotebookForm } from "@/components/create-notebook-form";
 
 export default async function DashboardPage() {
-  const { getToken, orgId } = await auth();
-
-  if (!orgId) {
-    return (
-      <main className="mx-auto max-w-3xl px-6 py-16">
-        <div className="rounded-2xl border border-[#424754] bg-[#1c1b1c] p-8">
-          <p className="mb-4 text-[#e5e2e3]">
-            You need to be in an organization to use PyNote.
-          </p>
-          <OrganizationSwitcher
-            createOrganizationMode="modal"
-            hidePersonal={false}
-          />
-        </div>
-      </main>
-    );
-  }
-
+  const { getToken } = await auth();
   const token = await getToken();
   const notebooks = await listNotebooks(token);
 

@@ -29,6 +29,12 @@ async def get_job(
     db: AsyncSession = Depends(get_db),
 ) -> Job:
     job = await db.get(Job, job_id)
-    if job is None or (job.org_id is not None and job.org_id != principal.org_id):
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found.")
+    # Org user can see jobs in their org and unscoped jobs; solo user can only
+    # see unscoped jobs. NOTE: Job has no owner_user_id yet, so two solo users
+    # can technically see each other's unscoped jobs — follow-up to add
+    # owner_user_id to Job for full isolation.
+    if job.org_id is not None and job.org_id != principal.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found.")
     return job
