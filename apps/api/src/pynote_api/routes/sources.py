@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pynote_api.auth import Principal
-from pynote_api.deps import current_principal, get_arq, get_db
+from pynote_api.deps import current_principal, get_arq, get_db, load_owned_notebook
 from pynote_core.models import Notebook, Source, SourcePart
 from pynote_core.storage import delete as s3_delete
 from pynote_core.storage import get_object_stream, upload_bytes
@@ -53,16 +53,15 @@ class SourcePartOut(BaseModel):
 
 
 async def _owned_notebook(notebook_id: UUID, principal: Principal, db: AsyncSession) -> Notebook:
-    notebook = await db.get(Notebook, notebook_id)
-    if notebook is None or notebook.org_id != principal.org_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Notebook not found.")
-    return notebook
+    return await load_owned_notebook(notebook_id, principal, db)
 
 
 async def _owned_source(source_id: UUID, principal: Principal, db: AsyncSession) -> Source:
     source = await db.get(Source, source_id)
     if source is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found.")
+    # Authorize via the parent notebook — Source has no tenant column of its own,
+    # so notebook scoping is the only correct check.
     await _owned_notebook(source.notebook_id, principal, db)
     return source
 
@@ -107,10 +106,14 @@ async def upload_source(
             f"File exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit.",
         )
 
-    await _owned_notebook(notebook_id, principal, db)
+    notebook = await _owned_notebook(notebook_id, principal, db)
 
     source_id = uuid4()
-    key = f"org/{principal.org_id}/notebook/{notebook_id}/source/{source_id}/{file.filename}"
+    # Key prefix derives from the NOTEBOOK's tenancy, not the principal's:
+    # a notebook keeps the same storage path even if the owner later switches
+    # into/out of an org. Solo notebooks land under `user/<id>/...`.
+    scope = f"org/{notebook.org_id}" if notebook.org_id else f"user/{notebook.owner_user_id}"
+    key = f"{scope}/notebook/{notebook_id}/source/{source_id}/{file.filename}"
     bytes_uri = upload_bytes(key, data, content_type=PDF_CONTENT_TYPE)
 
     source = Source(

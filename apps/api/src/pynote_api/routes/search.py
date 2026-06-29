@@ -11,15 +11,14 @@ each hit carries the chunk identity, the source it came from, char offsets
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pynote_api.auth import Principal
-from pynote_api.deps import current_principal, get_db
+from pynote_api.deps import current_principal, get_db, load_owned_notebook
 from pynote_core.embeddings import get_embedder
-from pynote_core.models import Notebook
 
 router = APIRouter(tags=["search"])
 
@@ -114,9 +113,7 @@ async def search_notebook(
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
 ) -> SearchResponse:
-    notebook = await db.get(Notebook, notebook_id)
-    if notebook is None or notebook.org_id != principal.org_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Notebook not found.")
+    await load_owned_notebook(notebook_id, principal, db)
 
     embedder = get_embedder()
     qvec = await embedder.embed_one(body.q)

@@ -16,8 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pynote_api.auth import Principal
-from pynote_api.deps import current_principal, get_db
-from pynote_core.models import Notebook, Source, SourcePart
+from pynote_api.deps import current_principal, get_db, load_owned_notebook
+from pynote_core.models import Source, SourcePart
 from pynote_core.summarizer import generate_notebook_summary
 
 router = APIRouter(tags=["summaries"])
@@ -37,11 +37,8 @@ class NotebookSummaryOut(BaseModel):
 # ---- helpers --------------------------------------------------------------
 
 
-async def _owned_notebook(notebook_id: UUID, principal: Principal, db: AsyncSession) -> Notebook:
-    notebook = await db.get(Notebook, notebook_id)
-    if notebook is None or notebook.org_id != principal.org_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Notebook not found.")
-    return notebook
+async def _owned_notebook(notebook_id: UUID, principal: Principal, db: AsyncSession):
+    return await load_owned_notebook(notebook_id, principal, db)
 
 
 def _summary_from_settings(settings: dict[str, Any]) -> NotebookSummaryOut | None:

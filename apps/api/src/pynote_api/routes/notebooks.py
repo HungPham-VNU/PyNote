@@ -2,14 +2,13 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import Select
 
 from pynote_api.auth import Principal
-from pynote_api.deps import current_principal, get_db
+from pynote_api.deps import current_principal, get_db, load_owned_notebook, scope_notebooks
 from pynote_core.models import Membership, Notebook, Org, User
 
 router = APIRouter(tags=["notebooks"])
@@ -26,26 +25,6 @@ class NotebookOut(BaseModel):
     owner_user_id: str
 
     model_config = {"from_attributes": True}
-
-
-def _scope_notebooks(stmt: Select, principal: Principal) -> Select:
-    """Restrict a Notebook select to rows the principal can see.
-
-    - Solo user (no org): only notebooks they own that are not in any org.
-    - Org user: notebooks in the active org, plus their own solo notebooks
-      (so switching into an org doesn't hide what you created beforehand).
-    """
-    if principal.org_id is None:
-        return stmt.where(
-            Notebook.owner_user_id == principal.user_id,
-            Notebook.org_id.is_(None),
-        )
-    return stmt.where(
-        or_(
-            Notebook.org_id == principal.org_id,
-            Notebook.owner_user_id == principal.user_id,
-        )
-    )
 
 
 async def _ensure_identity(db: AsyncSession, principal: Principal) -> None:
@@ -73,9 +52,7 @@ async def list_notebooks(
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
 ) -> list[Notebook]:
-    stmt = _scope_notebooks(select(Notebook), principal).order_by(
-        Notebook.created_at.desc()
-    )
+    stmt = scope_notebooks(select(Notebook), principal).order_by(Notebook.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
@@ -107,11 +84,7 @@ async def get_notebook(
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
 ) -> Notebook:
-    stmt = _scope_notebooks(select(Notebook).where(Notebook.id == notebook_id), principal)
-    notebook = (await db.execute(stmt)).scalar_one_or_none()
-    if notebook is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Notebook not found.")
-    return notebook
+    return await load_owned_notebook(notebook_id, principal, db)
 
 
 @router.delete("/notebooks/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -120,8 +93,5 @@ async def delete_notebook(
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    stmt = _scope_notebooks(select(Notebook).where(Notebook.id == notebook_id), principal)
-    notebook = (await db.execute(stmt)).scalar_one_or_none()
-    if notebook is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Notebook not found.")
+    notebook = await load_owned_notebook(notebook_id, principal, db)
     await db.delete(notebook)

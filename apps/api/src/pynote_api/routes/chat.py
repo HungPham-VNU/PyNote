@@ -18,16 +18,15 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pynote_api.auth import Principal
-from pynote_api.deps import current_principal, get_db
+from pynote_api.deps import current_principal, get_db, load_owned_notebook
 from pynote_core.chat_graph import open_chat_graph
-from pynote_core.models import Notebook
 
 router = APIRouter(tags=["chat"])
 
@@ -56,9 +55,7 @@ class HistoryResponse(BaseModel):
 
 
 async def _check_notebook(notebook_id: UUID, principal: Principal, db: AsyncSession) -> None:
-    notebook = await db.get(Notebook, notebook_id)
-    if notebook is None or notebook.org_id != principal.org_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Notebook not found.")
+    await load_owned_notebook(notebook_id, principal, db)
 
 
 def _sse(event: str, data: dict[str, Any]) -> bytes:
