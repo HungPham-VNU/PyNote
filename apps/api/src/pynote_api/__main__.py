@@ -33,11 +33,18 @@ def main() -> None:
     default_reload = "0" if sys.platform == "win32" else "1"
     reload = os.environ.get("API_RELOAD", default_reload) == "1"
 
+    # `loop="none"` keeps uvicorn from replacing the SelectorEventLoop we set
+    # above with its default (ProactorEventLoop on Windows), which would break
+    # psycopg3's async mode. Skip on reload — the reloader spawns workers that
+    # need uvicorn's own loop handling.
+    loop = "none" if sys.platform == "win32" and not reload else "auto"
+
     uvicorn.run(
         "pynote_api.main:app",
         host=os.environ.get("API_HOST", "127.0.0.1"),
         port=int(os.environ.get("API_PORT", "8000")),
         reload=reload,
+        loop=loop,
     )
 
 
