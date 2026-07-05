@@ -138,7 +138,7 @@ async def rerank(query: str, hits: Sequence[Hit], *, top_k: int = 8) -> list[Hit
     from langchain_core.documents import Document
     from langchain_voyageai import VoyageAIRerank
 
-    reranker = VoyageAIRerank(
+    reranker = VoyageAIRerank(  # type: ignore[call-arg]
         model=settings.rerank_model,
         voyageai_api_key=settings.voyage_api_key,
         top_k=top_k,

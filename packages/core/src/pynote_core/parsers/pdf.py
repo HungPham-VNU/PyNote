@@ -17,7 +17,7 @@ from pynote_core.parsers.types import ParsedPart
 
 
 def parse_pdf(path: Path) -> Iterator[ParsedPart]:
-    with pymupdf.open(path) as doc:
+    with pymupdf.open(path) as doc:  # type: ignore[no-untyped-call]
         for ordinal, page in enumerate(doc):
             text = page.get_text("text").strip()
             rect = page.rect

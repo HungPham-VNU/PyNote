@@ -12,6 +12,7 @@ if sys.platform == "win32":
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from arq.connections import RedisSettings, create_pool
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,7 +22,7 @@ from pynote_core.tracing import configure_tracing
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_tracing()
     # Create LangGraph checkpoint tables if missing. Idempotent.
     from pynote_core.chat_graph import setup_checkpoint_tables
@@ -35,7 +36,26 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         logging.getLogger("pynote_api").exception(
             "Failed to set up LangGraph checkpoint tables; /chat will fail until DB is up."
         )
-    yield
+
+    # One arq/Redis pool for the whole process, reused by every request that
+    # enqueues a job (see deps.get_arq). Guarded so a briefly-down Redis at
+    # boot doesn't crash startup — get_arq falls back to a transient pool.
+    settings = get_settings()
+    try:
+        app.state.arq_pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    except Exception:
+        import logging
+
+        app.state.arq_pool = None
+        logging.getLogger("pynote_api").exception(
+            "Failed to create the shared arq pool at startup; will create per-request."
+        )
+    try:
+        yield
+    finally:
+        pool = getattr(app.state, "arq_pool", None)
+        if pool is not None:
+            await pool.close()
 
 
 def create_app() -> FastAPI:

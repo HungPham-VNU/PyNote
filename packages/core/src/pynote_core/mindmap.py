@@ -60,7 +60,9 @@ class MindMapCitation(BaseModel):
 
 
 class MindMapNode(BaseModel):
-    id: str = Field(description="Short stable slug, e.g. 'gradient_descent'. Unique within the map.")
+    id: str = Field(
+        description="Short stable slug, e.g. 'gradient_descent'. Unique within the map."
+    )
     label: str = Field(description="Human-readable name shown on the node.")
     kind: str = Field(description="One of: concept, entity, person, event, claim.")
     citations: list[MindMapCitation] = Field(default_factory=list)
@@ -69,7 +71,9 @@ class MindMapNode(BaseModel):
 class MindMapEdge(BaseModel):
     from_id: str = Field(alias="from")
     to_id: str = Field(alias="to")
-    label: str = Field(description="Short verb phrase describing the relationship, e.g. 'depends on'.")
+    label: str = Field(
+        description="Short verb phrase describing the relationship, e.g. 'depends on'."
+    )
     citations: list[MindMapCitation] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}

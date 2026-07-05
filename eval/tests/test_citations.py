@@ -54,6 +54,57 @@ def test_citation_includes_page_and_title() -> None:
     assert answer.citations[0].source_title == "doc-3"
 
 
+def test_citation_recovers_span_when_offsets_are_bogus() -> None:
+    """Some providers/gateways return `cited_text` but 0/0 offsets.
+
+    We must still ground the citation by locating the quote in the chunk and
+    reporting the recovered offsets, not a zero-width failed roundtrip.
+    """
+    chunk = "Photosynthesis converts light into chemical energy."
+    hits = [_hit(chunk, 0)]
+    content = [
+        {
+            "type": "text",
+            "text": "It makes chemical energy.",
+            "citations": [
+                {
+                    "type": "search_result_location",
+                    "cited_text": "chemical energy",
+                    "search_result_index": 0,
+                    "start_char_index": 0,
+                    "end_char_index": 0,
+                }
+            ],
+        }
+    ]
+    [cit] = parse_response(content, hits).citations
+    assert cit.roundtrip_ok is True
+    assert cit.chunk_text_slice == "chemical energy"
+    assert chunk[cit.start_char_index : cit.end_char_index] == "chemical energy"
+
+
+def test_citation_roundtrip_fails_when_quote_absent() -> None:
+    """If the quote isn't in the chunk at all, roundtrip must stay False."""
+    hits = [_hit("nothing relevant here", 0)]
+    content = [
+        {
+            "type": "text",
+            "text": "x",
+            "citations": [
+                {
+                    "type": "search_result_location",
+                    "cited_text": "totally different text",
+                    "search_result_index": 0,
+                    "start_char_index": 0,
+                    "end_char_index": 0,
+                }
+            ],
+        }
+    ]
+    [cit] = parse_response(content, hits).citations
+    assert cit.roundtrip_ok is False
+
+
 # ---- pack_search_results ---------------------------------------------------
 
 
@@ -107,9 +158,11 @@ def test_parse_extracts_text_and_citations() -> None:
     assert c.roundtrip_ok is True
 
 
-def test_parse_flags_offset_drift_as_failed_roundtrip() -> None:
+def test_parse_recovers_drifted_offsets_when_quote_present() -> None:
     hits = [_hit("The sky is blue.", 0)]
-    # cited_text says "blue" but offsets point at "sky " — drift case.
+    # cited_text says "blue" but offsets point at "sky " — drift. Because the
+    # quote genuinely appears in the chunk we recover it (correcting the
+    # offsets) rather than reporting a failed roundtrip.
     content = [
         {
             "type": "text",
@@ -128,9 +181,10 @@ def test_parse_flags_offset_drift_as_failed_roundtrip() -> None:
     answer = parse_response(content, hits)
     assert len(answer.citations) == 1
     c = answer.citations[0]
-    assert c.chunk_text_slice == "sky "
     assert c.cited_text == "blue"
-    assert c.roundtrip_ok is False
+    assert c.chunk_text_slice == "blue"
+    assert c.roundtrip_ok is True
+    assert "The sky is blue."[c.start_char_index : c.end_char_index] == "blue"
 
 
 def test_parse_skips_malformed_or_out_of_range_citations() -> None:
@@ -211,9 +265,9 @@ def test_fidelity_counts_roundtrip_fraction() -> None:
                     "start_char_index": 11,
                     "end_char_index": 16,
                 },
-                {  # drift: offsets point at "alph" but cited_text says "beta"
+                {  # genuine failure: "delta" is nowhere in the chunk
                     "type": "search_result_location",
-                    "cited_text": "beta",
+                    "cited_text": "delta",
                     "search_result_index": 0,
                     "start_char_index": 0,
                     "end_char_index": 4,
@@ -222,5 +276,5 @@ def test_fidelity_counts_roundtrip_fraction() -> None:
         }
     ]
     answer = parse_response(content, hits)
-    # 2 of 3 roundtrip cleanly.
+    # 2 of 3 roundtrip cleanly; the ungrounded "delta" quote does not.
     assert abs(fidelity(answer) - 2 / 3) < 1e-9

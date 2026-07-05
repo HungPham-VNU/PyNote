@@ -32,6 +32,20 @@ def _ts_kwargs(*, on_update: bool = False) -> dict[str, Any]:
     return kw
 
 
+def _ts_field(*, on_update: bool = False) -> Any:
+    """A timezone-aware timestamp column: Python default + DB `server_default`.
+
+    Centralized so the one SQLModel typing gap we hit — `Field` has no overload
+    matching `default_factory` + `sa_type` + `sa_column_kwargs` together — is
+    silenced in exactly one place instead of on every timestamp field.
+    """
+    return Field(  # type: ignore[call-overload]
+        default_factory=_utcnow,
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs=_ts_kwargs(on_update=on_update),
+    )
+
+
 # ---- Tenancy (Clerk-managed identity) --------------------------------------
 #
 # We do not own user authentication — Clerk does. We mirror just enough identity
@@ -45,16 +59,8 @@ class Org(SQLModel, table=True):
     name: str = Field(max_length=255)
     settings: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
-    created_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(),
-    )
-    updated_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(on_update=True),
-    )
+    created_at: datetime = _ts_field()
+    updated_at: datetime = _ts_field(on_update=True)
 
     notebooks: list["Notebook"] = Relationship(back_populates="org")
 
@@ -66,16 +72,8 @@ class User(SQLModel, table=True):
     email: str = Field(max_length=320, index=True)
     display_name: str | None = Field(default=None, max_length=255)
 
-    created_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(),
-    )
-    updated_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(on_update=True),
-    )
+    created_at: datetime = _ts_field()
+    updated_at: datetime = _ts_field(on_update=True)
 
 
 class Membership(SQLModel, table=True):
@@ -85,16 +83,8 @@ class Membership(SQLModel, table=True):
     org_id: str = Field(primary_key=True, foreign_key="org.id", max_length=64)
     role: str = Field(default="member", max_length=32)  # member | admin | owner
 
-    created_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(),
-    )
-    updated_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(on_update=True),
-    )
+    created_at: datetime = _ts_field()
+    updated_at: datetime = _ts_field(on_update=True)
 
 
 # ---- Notebook --------------------------------------------------------------
@@ -108,23 +98,13 @@ class Notebook(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    org_id: str | None = Field(
-        default=None, foreign_key="org.id", max_length=64, index=True
-    )
+    org_id: str | None = Field(default=None, foreign_key="org.id", max_length=64, index=True)
     owner_user_id: str = Field(foreign_key="user.id", max_length=64, index=True)
     title: str = Field(max_length=255)
     settings: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
-    created_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(),
-    )
-    updated_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(on_update=True),
-    )
+    created_at: datetime = _ts_field()
+    updated_at: datetime = _ts_field(on_update=True)
 
     org: Org | None = Relationship(back_populates="notebooks")
     sources: list["Source"] = Relationship(back_populates="notebook")
@@ -153,16 +133,8 @@ class Source(SQLModel, table=True):
     error: str | None = Field(default=None)
     meta: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
-    created_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(),
-    )
-    updated_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(on_update=True),
-    )
+    created_at: datetime = _ts_field()
+    updated_at: datetime = _ts_field(on_update=True)
 
     notebook: Notebook = Relationship(back_populates="sources")
     parts: list["SourcePart"] = Relationship(
@@ -182,11 +154,7 @@ class SourcePart(SQLModel, table=True):
     text: str = Field()  # extracted text; "" allowed for image-only pages
     bbox: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
 
-    created_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(),
-    )
+    created_at: datetime = _ts_field()
 
     source: Source = Relationship(back_populates="parts")
     chunks: list["Chunk"] = Relationship(
@@ -231,11 +199,7 @@ class Chunk(SQLModel, table=True):
     tsv: str | None = Field(default=None, sa_column=Column(TSVECTOR, nullable=True))
     meta: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
-    created_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(),
-    )
+    created_at: datetime = _ts_field()
 
     part: SourcePart = Relationship(back_populates="chunks")
 
@@ -257,13 +221,5 @@ class Job(SQLModel, table=True):
     error: str | None = Field(default=None)
     arq_job_id: str | None = Field(default=None, max_length=64, index=True)
 
-    created_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(),
-    )
-    updated_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs=_ts_kwargs(on_update=True),
-    )
+    created_at: datetime = _ts_field()
+    updated_at: datetime = _ts_field(on_update=True)

@@ -65,6 +65,27 @@ class ParsedAnswer:
     citations: list[ResolvedCitation]
 
 
+def _resolve_span(
+    chunk_text: str, start: int, end: int, cited_text: str
+) -> tuple[int, int, str, bool]:
+    """Map a citation to a verified span of `chunk_text`.
+
+    First trust the model's char offsets. If the slice they point at doesn't
+    equal `cited_text` — which happens when the provider returns `cited_text`
+    but bogus offsets (some gateways send 0/0) — fall back to locating the quote
+    as a substring and recovering the real offsets. Only if neither path
+    reproduces the quote do we report `roundtrip_ok=False`.
+    """
+    slice_ = chunk_text[start:end]
+    if cited_text and slice_ == cited_text:
+        return start, end, slice_, True
+    if cited_text:
+        found = chunk_text.find(cited_text)
+        if found != -1:
+            return found, found + len(cited_text), cited_text, True
+    return start, end, slice_, False
+
+
 def parse_response(content: Any, hits: list[Hit]) -> ParsedAnswer:
     """Walk Claude's content blocks, extracting text + citations.
 
@@ -94,10 +115,11 @@ def parse_response(content: Any, hits: list[Hit]) -> ParsedAnswer:
             start = int(c.get("start_char_index", 0))
             end = int(c.get("end_char_index", start))
             hit = hits[idx]
-            slice_ = hit.text[start:end]
+            cited_text = str(c.get("cited_text", ""))
+            start, end, slice_, ok = _resolve_span(hit.text, start, end, cited_text)
             citations.append(
                 ResolvedCitation(
-                    cited_text=str(c.get("cited_text", "")),
+                    cited_text=cited_text,
                     search_result_index=idx,
                     start_char_index=start,
                     end_char_index=end,
@@ -107,7 +129,7 @@ def parse_response(content: Any, hits: list[Hit]) -> ParsedAnswer:
                     source_title=hit.source_title,
                     page=hit.page,
                     chunk_text_slice=slice_,
-                    roundtrip_ok=slice_ == str(c.get("cited_text", "")),
+                    roundtrip_ok=ok,
                 )
             )
 

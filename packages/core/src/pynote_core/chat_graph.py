@@ -149,7 +149,7 @@ async def node_generate(state: ChatState) -> dict[str, Any]:
     messages: list[BaseMessage] = [
         SystemMessage(content=SYSTEM_PROMPT),
         *(state.get("messages") or []),
-        HumanMessage(content=blocks),  # type: ignore[arg-type] — dict-list content
+        HumanMessage(content=blocks),  # type: ignore[arg-type]  # dict-list content
     ]
 
     model = _build_chat_model()
@@ -182,13 +182,13 @@ def _build_chat_model() -> ChatAnthropic:
     pass `search_result` content blocks ourselves and don't want the fallback.
     """
     settings = get_settings()
-    return ChatAnthropic(
+    return ChatAnthropic(  # type: ignore[call-arg]
         model=settings.anthropic_model_chat,
         **_anthropic_kwargs(settings),  # type: ignore[arg-type]
     )
 
 
-def _build_graph() -> StateGraph:
+def _build_graph() -> StateGraph[ChatState]:
     g = StateGraph(ChatState)
     g.add_node("retrieve", node_retrieve)
     g.add_node("generate", node_generate)
@@ -201,7 +201,7 @@ def _build_graph() -> StateGraph:
 
 
 @asynccontextmanager
-async def open_chat_graph() -> AsyncIterator[CompiledStateGraph]:
+async def open_chat_graph() -> AsyncIterator[CompiledStateGraph[ChatState]]:
     """Context manager that yields a compiled graph with PostgresSaver checkpointer.
 
     The saver opens a connection pool; we close it on exit. Use:
@@ -218,7 +218,7 @@ async def open_chat_graph() -> AsyncIterator[CompiledStateGraph]:
 
 
 @lru_cache(maxsize=1)
-def _graph_singleton() -> StateGraph:
+def _graph_singleton() -> StateGraph[ChatState]:
     """Uncompiled graph singleton — useful for static inspection / tests."""
     return _build_graph()
 

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 @lru_cache(maxsize=1)
 def get_s3_client() -> S3Client:
     settings = get_settings()
-    return boto3.client(  # type: ignore[return-value]
+    return boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url,
         region_name=settings.s3_region,
@@ -61,7 +61,7 @@ def upload_bytes(key: str, data: bytes, content_type: str | None = None) -> str:
         Bucket=settings.s3_bucket,
         Key=key,
         Body=data,
-        **extra,  # type: ignore[arg-type]
+        **extra,
     )
     return make_uri(key)
 

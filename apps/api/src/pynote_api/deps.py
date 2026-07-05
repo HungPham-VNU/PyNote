@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 from arq.connections import ArqRedis, RedisSettings, create_pool
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
@@ -20,7 +20,15 @@ async def get_db() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def get_arq() -> AsyncIterator[ArqRedis]:
+async def get_arq(request: Request) -> AsyncIterator[ArqRedis]:
+    # Prefer the process-wide pool created in the app lifespan (main.lifespan).
+    # Fall back to a transient pool only when it's missing — e.g. Redis was down
+    # at startup, or an ASGI context ran without the lifespan.
+    pool = getattr(request.app.state, "arq_pool", None)
+    if pool is not None:
+        yield pool
+        return
+
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:

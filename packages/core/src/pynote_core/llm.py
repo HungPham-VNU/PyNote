@@ -40,7 +40,7 @@ def _anthropic_kwargs(settings: Settings) -> dict[str, object]:
 def _make_anthropic(model: str, settings: Settings) -> BaseChatModel:
     from langchain_anthropic import ChatAnthropic
 
-    return ChatAnthropic(model=model, **_anthropic_kwargs(settings))  # type: ignore[arg-type]
+    return ChatAnthropic(model=model, **_anthropic_kwargs(settings))  # type: ignore[call-arg, arg-type]
 
 
 def _make_gemini(model: str, settings: Settings) -> BaseChatModel:
