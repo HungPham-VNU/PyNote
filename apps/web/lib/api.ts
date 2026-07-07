@@ -57,8 +57,12 @@ async function request<T>(
 
 // ---- Notebooks -------------------------------------------------------------
 
-export async function listNotebooks(token: string | null): Promise<Notebook[]> {
-  return request<Notebook[]>("/api/v1/notebooks", { token });
+export async function listNotebooks(
+  token: string | null,
+  query?: string,
+): Promise<Notebook[]> {
+  const qs = query ? `?q=${encodeURIComponent(query)}` : "";
+  return request<Notebook[]>(`/api/v1/notebooks${qs}`, { token });
 }
 
 export async function getNotebook(
@@ -77,6 +81,29 @@ export async function createNotebook(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
+  });
+}
+
+export async function updateNotebook(
+  token: string | null,
+  id: string,
+  title: string,
+): Promise<Notebook> {
+  return request<Notebook>(`/api/v1/notebooks/${id}`, {
+    token,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function deleteNotebook(
+  token: string | null,
+  id: string,
+): Promise<void> {
+  return request<void>(`/api/v1/notebooks/${id}`, {
+    token,
+    method: "DELETE",
   });
 }
 

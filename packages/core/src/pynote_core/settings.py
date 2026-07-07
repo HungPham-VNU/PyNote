@@ -48,7 +48,10 @@ class Settings(BaseSettings):
 
     # ---- LLM: Gemini (free-tier cheap ops) ----
     google_api_key: str | None = None
-    gemini_model_cheap: str = "gemini-2.0-flash"
+    # gemini-2.0-flash was shut down 2026-06-01 (429 with limit:0 on free tier).
+    # flash-lite has the largest free quota (15 RPM / 1000 RPD) — right for the
+    # cheap role: outlines + per-turn query rewrites.
+    gemini_model_cheap: str = "gemini-2.5-flash-lite"
     gemini_model_heavy: str = "gemini-2.5-pro"
 
     # ---- Embeddings ----
