@@ -89,7 +89,7 @@ _HYBRID_SQL = sql_text(
 async def hybrid_retrieve(notebook_id: UUID, query: str, *, k: int = 50) -> list[Hit]:
     """RRF over pgvector + tsvector, scoped to one notebook."""
     embedder = get_embedder()
-    qvec = await embedder.embed_one(query)
+    qvec = await embedder.embed_query(query)
     qvec_literal = "[" + ",".join(f"{x:.6f}" for x in qvec) + "]"
 
     async with async_session_scope() as db:
@@ -125,6 +125,28 @@ async def hybrid_retrieve(notebook_id: UUID, query: str, *, k: int = 50) -> list
             )
         )
     return out
+
+
+def dedup_overlaps(hits: Sequence[Hit], *, top_k: int = 8) -> list[Hit]:
+    """Drop hits whose char range overlaps a higher-ranked hit from the same part.
+
+    Chunk overlap (200 chars) means adjacent chunks often both survive rerank,
+    wasting search_result slots on near-duplicate text. Callers over-fetch from
+    rerank (e.g. top_k=12) and dedup down to the packing budget.
+    """
+    kept: list[Hit] = []
+    for h in hits:  # hits arrive best-first
+        clash = any(
+            k.source_part_id == h.source_part_id
+            and h.char_start < k.char_end
+            and k.char_start < h.char_end
+            for k in kept
+        )
+        if not clash:
+            kept.append(h)
+        if len(kept) == top_k:
+            break
+    return kept
 
 
 async def rerank(query: str, hits: Sequence[Hit], *, top_k: int = 8) -> list[Hit]:
