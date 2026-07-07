@@ -1,0 +1,3 @@
+{"q": "REPLACE: a question answerable from your notebook", "gold_spans": [{"must_contain": "REPLACE: exact substring from the source that answers it", "source_title": "REPLACE or remove", "page": 1}]}
+{"q": "REPLACE: an exact-number question", "gold_spans": [{"must_contain": "REPLACE: the sentence containing the number"}]}
+{"q": "REPLACE: a question whose answer spans two candidate passages", "gold_spans": [{"must_contain": "REPLACE: passage one substring"}, {"must_contain": "REPLACE: passage two substring"}]}

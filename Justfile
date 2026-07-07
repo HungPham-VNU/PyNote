@@ -89,6 +89,11 @@ web:
 test:
     uv run pytest -q
 
+# Retrieval-stage eval (recall@k / MRR, no LLM). Usage:
+#   just eval-retrieval NOTEBOOK_UUID [file]
+eval-retrieval notebook file="eval/golden/retrieval.jsonl":
+    uv run python -m eval.retrieval_eval --notebook {{notebook}} --file {{file}}
+
 test-smoke:
     uv run pytest packages/core/tests/test_llm_factory.py::test_smoke_chat_ping -v
 
