@@ -33,12 +33,22 @@ export function SourceList({
   useEffect(() => {
     const anyInFlight = sources.some((s) => !TERMINAL.has(s.status));
     if (!anyInFlight) return;
+    const curKey = sources.map((s) => `${s.id}:${s.status}`).join("|");
     let cancelled = false;
     const tick = async () => {
       try {
         const token = await getToken();
         const next = await listSources(token, notebookId);
-        if (!cancelled) setSources(next);
+        if (cancelled) return;
+        setSources(next);
+        const nextKey = next.map((s) => `${s.id}:${s.status}`).join("|");
+        if (nextKey !== curKey) {
+          // A status changed (e.g. a source became ready). Re-render the
+          // server page so props derived from source status — like
+          // hasReadySource for Summary/Mind map/Chat — update without a
+          // manual reload. Client state (chat history, etc.) is preserved.
+          router.refresh();
+        }
       } catch {
         // soft fail — next tick will retry
       }
@@ -48,7 +58,7 @@ export function SourceList({
       cancelled = true;
       clearInterval(handle);
     };
-  }, [sources, notebookId, getToken]);
+  }, [sources, notebookId, getToken, router]);
 
   const onDelete = useCallback(
     async (id: string) => {
