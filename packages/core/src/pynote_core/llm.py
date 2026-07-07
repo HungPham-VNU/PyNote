@@ -51,14 +51,30 @@ def _make_anthropic(model: str, settings: Settings, max_tokens: int = 4096) -> B
     return ChatAnthropic(model=model, **_anthropic_kwargs(settings, max_tokens))  # type: ignore[call-arg, arg-type]
 
 
-def _make_gemini(model: str, settings: Settings) -> BaseChatModel:
+def _make_gemini(
+    model: str,
+    settings: Settings,
+    *,
+    max_output_tokens: int | None = None,
+    thinking_budget: int | None = None,
+) -> BaseChatModel:
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    return ChatGoogleGenerativeAI(
-        model=model,
-        google_api_key=settings.google_api_key or "missing",
-        temperature=0.2,
-    )
+    # Gemini 2.5 models "think" by default, spending output tokens on hidden
+    # reasoning. For large structured-output jobs (summary/mind map) that
+    # reasoning competes with the JSON inside the output budget and truncates
+    # it mid-token → OutputParserException. Callers that emit big JSON pass a
+    # generous `max_output_tokens` and `thinking_budget=0` to prevent this.
+    kwargs: dict[str, object] = {
+        "model": model,
+        "google_api_key": settings.google_api_key or "missing",
+        "temperature": 0.2,
+    }
+    if max_output_tokens is not None:
+        kwargs["max_output_tokens"] = max_output_tokens
+    if thinking_budget is not None:
+        kwargs["thinking_budget"] = thinking_budget
+    return ChatGoogleGenerativeAI(**kwargs)
 
 
 @lru_cache(maxsize=4)
@@ -92,7 +108,12 @@ def get_heavy_model() -> BaseChatModel:
     """For artifact generation (study guides, mind maps, audio scripts)."""
     settings = get_settings()
     if settings.provider_tier == "free" and settings.google_api_key:
-        return _make_gemini(settings.gemini_model_heavy, settings)
+        return _make_gemini(
+            settings.gemini_model_heavy,
+            settings,
+            max_output_tokens=HEAVY_MAX_TOKENS,
+            thinking_budget=0,
+        )
     return _make_anthropic(settings.anthropic_model_heavy, settings, max_tokens=HEAVY_MAX_TOKENS)
 
 

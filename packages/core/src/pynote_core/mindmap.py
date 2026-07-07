@@ -31,9 +31,13 @@ if TYPE_CHECKING:
 # is the bottleneck cost-wise, not quality — 60k chars (~15k tokens) covers a
 # 20-source academic notebook comfortably.
 MAX_INPUT_CHARS = 60_000
-MAX_NODES = 100
-MAX_EDGES = 300
-MAX_CITATIONS_PER_ITEM = 5
+# Kept deliberately small: a mind map is a readable overview, not an exhaustive
+# graph. ~30 nodes lays out legibly on screen, and the smaller the target the
+# less JSON the model emits per pass — which is also what keeps the structured
+# output from overrunning the token budget and truncating mid-generation.
+MAX_NODES = 30
+MAX_EDGES = 60
+MAX_CITATIONS_PER_ITEM = 2
 
 
 # ---- citation -----------------------------------------------------------
@@ -88,11 +92,10 @@ class MindMap(BaseModel):
 # ---- raw model output (block_index, not resolved citations) ---------------
 
 
-# The caps below (MAX_NODES / MAX_EDGES / citations<=5) are stated in the
+# The caps below (MAX_NODES / MAX_EDGES / citations per item) are stated in the
 # prompts but deliberately NOT enforced as schema max_length: the model treats
-# them as guidance and sometimes overshoots (e.g. 116 nodes against a cap of
-# 100), and a hard constraint would discard the whole multi-minute generation.
-# Overshoot is trimmed in `generate_mind_map` instead.
+# them as guidance and sometimes overshoots, and a hard constraint would discard
+# the whole multi-minute generation. Overshoot is trimmed in `generate_mind_map`.
 
 
 class _NodeDraft(BaseModel):
@@ -100,7 +103,8 @@ class _NodeDraft(BaseModel):
     label: str
     kind: str = Field(description="One of: concept, entity, person, event, claim.")
     citations: list[_CitationDraft] = Field(
-        default_factory=list, description="1-5 citations grounding this node."
+        default_factory=list,
+        description=f"1-{MAX_CITATIONS_PER_ITEM} citations grounding this node.",
     )
 
 
@@ -113,7 +117,8 @@ class _EdgeDraft(BaseModel):
     to_id: str = Field(alias="to")
     label: str
     citations: list[_CitationDraft] = Field(
-        default_factory=list, description="1-5 citations grounding this edge."
+        default_factory=list,
+        description=f"1-{MAX_CITATIONS_PER_ITEM} citations grounding this edge.",
     )
 
     model_config = {"populate_by_name": True}
