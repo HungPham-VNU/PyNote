@@ -171,6 +171,7 @@ async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
             return {"ok": False, "reason": f"unexpected-status:{source.status}"}
 
         notebook_id = source.notebook_id
+        source_title = source.title
         source.status = "embedding"
 
         # Load parts ordered.
@@ -212,9 +213,15 @@ async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
         return {"ok": True, "chunks": 0}
 
     # ---- 2. Embed in one batched call ----
+    # Contextual embeddings, title-only variant (RAG_ROADMAP 3.2): the source
+    # title is prepended to the text fed to the embedder so orphan chunks carry
+    # document identity. `chunk.text` is persisted RAW — the citation contract
+    # binds the stored text, not the embedding input. Section paths join the
+    # header when Docling lands (3.1).
     embed_phase = time.perf_counter()
     embedder = get_embedder()
-    texts = [c.text for (_, _, c) in all_chunks]
+    header = (source_title or "").strip()
+    texts = [f"{header}\n\n{c.text}" if header else c.text for (_, _, c) in all_chunks]
     vectors = await embedder.embed_many(texts)
     log.info(
         "embed_source[%s]: embedded %d chunks in %dms (%d-dim)",
@@ -259,12 +266,16 @@ async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
         await db.flush()
 
         # Populate tsvector once per source (one round-trip, indexed by GIN).
+        # Title terms are weighted below body text ('B' vs 'A') so a
+        # title-keyword query prefers chunks whose *body* matches too.
         await db.execute(
             sql_text(
-                "UPDATE chunk SET tsv = to_tsvector('english', text) "
+                "UPDATE chunk SET tsv = "
+                "  setweight(to_tsvector('english', text), 'A') || "
+                "  setweight(to_tsvector('english', :title), 'B') "
                 "WHERE source_id = :sid AND tsv IS NULL",
             ),
-            {"sid": str(sid)},
+            {"sid": str(sid), "title": source_title or ""},
         )
 
         src.status = "ready"

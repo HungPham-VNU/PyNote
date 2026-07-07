@@ -69,7 +69,7 @@ def test_repeated_headers_and_page_numbers_stripped(tmp_path: Path) -> None:
     pdf = _make_pdf(tmp_path, pages)
     parts = list(parse_pdf(pdf))
 
-    for i, (p, body) in enumerate(zip(parts, bodies), start=1):
+    for i, (p, body) in enumerate(zip(parts, bodies, strict=True), start=1):
         assert "Annual Report 2026" not in p.text
         assert f"Page {i}" not in p.text  # digit-normalized match
         assert body in p.text

@@ -111,7 +111,9 @@ def _flatten_text(content: Any) -> str:
     return ""
 
 
-def _trim_history(messages: list[BaseMessage], *, max_messages: int = MAX_HISTORY_MESSAGES) -> list[BaseMessage]:
+def _trim_history(
+    messages: list[BaseMessage], *, max_messages: int = MAX_HISTORY_MESSAGES
+) -> list[BaseMessage]:
     """Keep the most recent messages, aligned to start on a HumanMessage.
 
     Alignment matters: a window starting mid-turn (on an AIMessage) confuses
@@ -196,7 +198,7 @@ async def node_rewrite(state: ChatState) -> dict[str, Any]:
         rewritten = _flatten_text(resp.content).strip().strip('"')
         if rewritten:
             return {"search_query": rewritten}
-    except Exception as e:  # noqa: BLE001 — rewrite is best-effort by design
+    except Exception as e:  # rewrite is best-effort by design
         log.warning("query rewrite failed, falling back to raw question: %s", e)
     return {"search_query": question}
 

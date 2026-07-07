@@ -186,3 +186,30 @@ no references, so those two stay `None` unless you enrich the file:
 0.4.3 still imports `langchain_community.chat_models.vertexai`, which moved
 to its own package in lc-community 0.4.0. Remove the pin when ragas itself
 ships a fix.
+
+## Retrieval-stage eval (RAG_ROADMAP 2.2)
+
+`eval/retrieval_eval.py` scores retrieval alone — no LLM calls — so you can
+tell whether a bad answer was a retrieval miss or a generation failure, and
+tune `dense_limit` / `sparse_limit` / `top_k` with evidence.
+
+It reports recall@{5,8,20,50} and MRR at four stages: `dense` (pgvector only),
+`sparse` (tsvector only), `hybrid` (RRF fusion), and `packed` (post-rerank +
+overlap-dedup — the top-8 the model actually sees).
+
+Label questions with substring-based gold spans (they survive re-chunking):
+
+```json
+{"q": "What accuracy did the model reach?", "gold_spans": [{"must_contain": "reached 94.2% accuracy", "page": 6}]}
+```
+
+Copy `golden/retrieval.template.jsonl` to `golden/retrieval.jsonl`, label it
+against an ingested notebook, then:
+
+```bash
+just eval-retrieval NOTEBOOK_UUID
+# or: uv run python -m eval.retrieval_eval --notebook UUID --file eval/golden/retrieval.jsonl
+```
+
+Definition of done for any retrieval-affecting change: recall@8 and MRR not
+worse, and the M7 ship gate (`eval/run.py`) still passes.

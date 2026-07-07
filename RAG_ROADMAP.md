@@ -40,6 +40,22 @@ query rewriting). Fix order below reflects that.
 | 3 | Structural upgrade | 1–2 weeks | Docling structure parsing, contextual embeddings, embedding model upgrade |
 | 4 | Differentiation | ongoing | Source-scoped retrieval, query routing, vision RAG |
 
+## Implementation status (updated 2026-07-07)
+
+| Item | Status | Notes |
+|---|---|---|
+| 1.1 Query rewriting | ✅ done | `node_rewrite` in chat_graph.py; pass-through on turn 1, raw-question fallback on failure |
+| 1.2 BGE query prefix | ✅ done | `Embedder.embed_query` → fastembed `query_embed`; no re-embedding needed |
+| 1.3 Shared checkpointer pool | ✅ done | `open_pooled_chat_graph` (psycopg AsyncConnectionPool) entered once in API lifespan; routes fall back per-request if boot failed |
+| 1.4 Prompt caching | ✅ done | Breakpoints on system prompt + last prior Human turn in `node_generate` |
+| 1.5 Overlap dedup | ✅ done | `dedup_overlaps` in retrieval.py; rerank over-fetches 12 → packs 8 |
+| 1.6 History trimming | ✅ done | `_trim_history` (12-message tail, Human-aligned); `map_citations` clears `hits` from checkpoints |
+| 2.1 Per-message citations | ✅ done | Citations persisted on `AIMessage.additional_kwargs`; history endpoint reads per-message with `last_citations` fallback for old threads |
+| 2.2 Retrieval eval | ✅ done | `eval/retrieval_eval.py` + `just eval-retrieval`; template at `eval/golden/retrieval.template.jsonl` — **needs a real golden set labeled against an ingested notebook** |
+| 2.3 Parser hygiene | ✅ partial | Header/footer stripping + de-hyphenation done. Cross-page chunk flow deliberately skipped: it can't preserve the citation contract with page-based parts; resolved properly by section-based parts in 3.1 |
+| 3.2 Contextual embeddings | ✅ title-only | Title prepended to embedding input + `setweight`-ed into tsvector; raw `chunk.text` untouched. Section paths join when 3.1 lands. Applies to sources ingested after this change — re-ingest older sources to benefit |
+| 3.1 Docling, 3.3 embedding upgrade, Phase 4 | ⬜ pending | Gated on a labeled retrieval golden set (2.2) for before/after measurement |
+
 **Rule for phases 3–4: land Phase 2's retrieval eval first.** Every structural
 change after that gets a before/after recall@k number, not vibes.
 

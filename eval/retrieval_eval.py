@@ -63,9 +63,8 @@ def _matches(hit: Hit, span: dict[str, Any]) -> bool:
         return False
     if span.get("page") is not None and hit.page != span["page"]:
         return False
-    if span.get("source_title") is not None and (hit.source_title or "") != span["source_title"]:
-        return False
-    return True
+    title = span.get("source_title")
+    return title is None or (hit.source_title or "") == title
 
 
 def _first_gold_rank(hits: list[Hit], gold_spans: list[dict[str, Any]]) -> int | None:
