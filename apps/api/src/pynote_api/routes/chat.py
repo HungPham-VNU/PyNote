@@ -15,10 +15,11 @@ GET /api/v1/notebooks/{notebook_id}/threads/{thread_id}/history
 
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from pydantic import BaseModel, Field
@@ -58,6 +59,18 @@ async def _check_notebook(notebook_id: UUID, principal: Principal, db: AsyncSess
     await load_owned_notebook(notebook_id, principal, db)
 
 
+@asynccontextmanager
+async def _graph_for(request: Request) -> AsyncIterator[Any]:
+    """Yield the process-wide chat graph (opened in lifespan), or fall back to
+    a per-request one when the shared pool failed at boot / in tests."""
+    shared = getattr(request.app.state, "chat_graph", None)
+    if shared is not None:
+        yield shared
+    else:
+        async with open_chat_graph() as graph:
+            yield graph
+
+
 def _sse(event: str, data: dict[str, Any]) -> bytes:
     """Single SSE event in the canonical wire format."""
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n".encode()
@@ -83,6 +96,7 @@ def _last_message_text(content: Any) -> str:
 
 @router.post("/notebooks/{notebook_id}/chat")
 async def chat(
+    request: Request,
     notebook_id: UUID,
     body: ChatRequest,
     principal: Principal = Depends(current_principal),
@@ -97,7 +111,7 @@ async def chat(
         yield _sse("start", {"thread_id": str(thread_id)})
 
         try:
-            async with open_chat_graph() as graph:
+            async with _graph_for(request) as graph:
                 state_input = {
                     "notebook_id": str(notebook_id),
                     "question": body.message,
@@ -149,6 +163,7 @@ async def chat(
     response_model=HistoryResponse,
 )
 async def thread_history(
+    request: Request,
     notebook_id: UUID,
     thread_id: UUID,
     principal: Principal = Depends(current_principal),
@@ -157,7 +172,7 @@ async def thread_history(
     await _check_notebook(notebook_id, principal, db)
 
     config = {"configurable": {"thread_id": str(thread_id)}}
-    async with open_chat_graph() as graph:
+    async with _graph_for(request) as graph:
         state = await graph.aget_state(config)  # type: ignore[arg-type]
 
     values = state.values or {}
@@ -171,13 +186,17 @@ async def thread_history(
                 HistoryMessage(role="user", content=_last_message_text(m.content)),
             )
         elif isinstance(m, AIMessage):
-            # Citations are only stored for the most recent assistant turn.
-            is_last_assistant = i == len(messages_raw) - 1
+            # Per-message citations live on additional_kwargs (RAG_ROADMAP 2.1).
+            # Threads persisted before that change only have `last_citations`
+            # for the final turn — fall back so old threads don't regress.
+            citations = m.additional_kwargs.get("citations")
+            if citations is None and i == len(messages_raw) - 1:
+                citations = last_citations
             history.append(
                 HistoryMessage(
                     role="assistant",
                     content=_last_message_text(m.content),
-                    citations=list(last_citations) if is_last_assistant else [],
+                    citations=list(citations or []),
                 )
             )
 

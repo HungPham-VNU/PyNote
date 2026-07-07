@@ -37,6 +37,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Failed to set up LangGraph checkpoint tables; /chat will fail until DB is up."
         )
 
+    # One compiled chat graph + checkpointer connection pool for the whole
+    # process (RAG_ROADMAP 1.3). Routes fall back to a per-request graph if
+    # this failed at boot (e.g. DB briefly down) — see chat._graph_for.
+    from pynote_core.chat_graph import open_pooled_chat_graph
+
+    graph_stack = AsyncExitStack()
+    app.state.chat_graph = None
+    try:
+        app.state.chat_graph = await graph_stack.enter_async_context(open_pooled_chat_graph())
+    except Exception:
+        import logging
+
+        logging.getLogger("pynote_api").exception(
+            "Failed to open the shared chat graph pool; /chat will fall back per-request."
+        )
+
     # One arq/Redis pool for the whole process, reused by every request that
     # enqueues a job (see deps.get_arq). Guarded so a briefly-down Redis at
     # boot doesn't crash startup — get_arq falls back to a transient pool.
@@ -56,6 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pool = getattr(app.state, "arq_pool", None)
         if pool is not None:
             await pool.close()
+        await graph_stack.aclose()
 
 
 def create_app() -> FastAPI:
