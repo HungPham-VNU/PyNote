@@ -29,6 +29,11 @@ class Embedder:
     async def embed_one(self, text: str) -> list[float]:
         return (await self.embed_many([text]))[0]
 
+    async def embed_query(self, text: str) -> list[float]:
+        """Embed a *search query*. Symmetric models fall back to embed_one;
+        asymmetric models (BGE) override to apply their query instruction."""
+        return await self.embed_one(text)
+
 
 class _FastembedBGE(Embedder):
     """Local ONNX inference via fastembed.
@@ -51,6 +56,14 @@ class _FastembedBGE(Embedder):
         # fastembed.embed is sync; run in a thread so the event loop stays free.
         vectors = await asyncio.to_thread(lambda: list(self._model.embed(items)))
         return [list(map(float, v)) for v in vectors]
+
+    async def embed_query(self, text: str) -> list[float]:
+        """BGE is asymmetric: queries need the instruction prefix. fastembed's
+        query_embed applies it; document vectors are unaffected (no migration)."""
+        import asyncio
+
+        vectors = await asyncio.to_thread(lambda: list(self._model.query_embed([text])))
+        return [float(x) for x in vectors[0]]
 
 
 @lru_cache(maxsize=1)
