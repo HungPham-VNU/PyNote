@@ -21,7 +21,15 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
 
-def _anthropic_kwargs(settings: Settings) -> dict[str, object]:
+# Artifact generation (mind maps, study guides) emits large structured outputs —
+# a 100-node mind map's tool-call JSON alone can run past 10k tokens. When the
+# Anthropic API hits max_tokens mid tool-use block, the tool input comes back as
+# an empty `{}`, which then fails Pydantic validation downstream ("nodes Field
+# required, input_value={}"). 16k is the safe ceiling for non-streaming requests.
+HEAVY_MAX_TOKENS = 16_000
+
+
+def _anthropic_kwargs(settings: Settings, max_tokens: int = 4096) -> dict[str, object]:
     """Common kwargs for ChatAnthropic — works against direct API or GH Models proxy.
 
     `temperature` is intentionally omitted: Anthropic deprecated it for Opus 4+
@@ -30,17 +38,17 @@ def _anthropic_kwargs(settings: Settings) -> dict[str, object]:
     """
     kw: dict[str, object] = {
         "api_key": settings.anthropic_api_key or "missing",
-        "max_tokens": 4096,
+        "max_tokens": max_tokens,
     }
     if settings.anthropic_base_url:
         kw["base_url"] = settings.anthropic_base_url
     return kw
 
 
-def _make_anthropic(model: str, settings: Settings) -> BaseChatModel:
+def _make_anthropic(model: str, settings: Settings, max_tokens: int = 4096) -> BaseChatModel:
     from langchain_anthropic import ChatAnthropic
 
-    return ChatAnthropic(model=model, **_anthropic_kwargs(settings))  # type: ignore[call-arg, arg-type]
+    return ChatAnthropic(model=model, **_anthropic_kwargs(settings, max_tokens))  # type: ignore[call-arg, arg-type]
 
 
 def _make_gemini(model: str, settings: Settings) -> BaseChatModel:
@@ -85,7 +93,7 @@ def get_heavy_model() -> BaseChatModel:
     settings = get_settings()
     if settings.provider_tier == "free" and settings.google_api_key:
         return _make_gemini(settings.gemini_model_heavy, settings)
-    return _make_anthropic(settings.anthropic_model_heavy, settings)
+    return _make_anthropic(settings.anthropic_model_heavy, settings, max_tokens=HEAVY_MAX_TOKENS)
 
 
 def reset_model_cache() -> None:

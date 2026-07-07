@@ -72,23 +72,28 @@ async def create_summary(
 ) -> NotebookSummaryOut:
     notebook = await _owned_notebook(notebook_id, principal, db)
 
-    # Gather text from every READY source in document order.
+    # Gather text from every READY source in document order, grouped per source
+    # so the summarizer can split its input budget across all of them.
     rows = await db.execute(
-        select(SourcePart.text)
+        select(Source.id, Source.title, SourcePart.text)
         .join(Source, Source.id == SourcePart.source_id)
         .where(Source.notebook_id == notebook_id, Source.status == "ready")
         .order_by(Source.created_at, SourcePart.ordinal),
     )
-    chunks = [row[0] for row in rows.all() if row[0]]
-    if not chunks:
+    parts_by_source: dict[UUID, tuple[str | None, list[str]]] = {}
+    for source_id, title, text in rows.all():
+        if not text:
+            continue
+        parts_by_source.setdefault(source_id, (title, []))[1].append(text)
+    docs = [(title, "\n\n".join(texts)) for title, texts in parts_by_source.values()]
+    if not docs:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Notebook has no ready sources. Upload and wait for parsing first.",
         )
-    joined = "\n\n".join(chunks)
 
     try:
-        summary = await generate_notebook_summary(joined)
+        summary = await generate_notebook_summary(docs)
     except Exception as e:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,

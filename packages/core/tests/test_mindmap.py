@@ -144,3 +144,30 @@ async def test_generate_drops_edges_with_unknown_node_ids(monkeypatch: Any) -> N
 async def test_generate_rejects_empty_notebook() -> None:
     with pytest.raises(ValueError, match="no text"):
         await generate_mind_map([(_part("   "), "doc")])
+
+
+@pytest.mark.asyncio
+async def test_generate_trims_model_overshoot_instead_of_failing(monkeypatch: Any) -> None:
+    """The MAX_NODES/MAX_EDGES caps are prompt guidance the model may exceed
+    (observed: 116 nodes against a cap of 100) — overshoot must be trimmed,
+    not blow up the whole generation with a ValidationError.
+    """
+    parts = [(_part("alpha beta gamma"), "doc")]
+    cite = [_CitationDraft(block_index=0, quote="alpha")]
+
+    nodes = NodeExtractionResult(
+        nodes=[
+            _NodeDraft(id=f"n{i}", label=f"Node {i}", kind="concept", citations=cite)
+            for i in range(mindmap.MAX_NODES + 16)
+        ]
+    )
+    edges = EdgeExtractionResult(
+        edges=[_EdgeDraft(**{"from": "n0", "to": "n1"}, label="relates to", citations=cite * 7)]
+    )
+    monkeypatch.setattr(mindmap, "get_heavy_model", lambda: _FakeModel(nodes, edges))
+
+    result = await generate_mind_map(parts)
+
+    assert len(result.nodes) == mindmap.MAX_NODES
+    # Citations beyond the per-item cap are dropped, not fatal.
+    assert len(result.edges[0].citations) == mindmap.MAX_CITATIONS_PER_ITEM

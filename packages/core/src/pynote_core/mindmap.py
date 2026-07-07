@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 MAX_INPUT_CHARS = 60_000
 MAX_NODES = 100
 MAX_EDGES = 300
+MAX_CITATIONS_PER_ITEM = 5
 
 
 # ---- citation -----------------------------------------------------------
@@ -87,28 +88,39 @@ class MindMap(BaseModel):
 # ---- raw model output (block_index, not resolved citations) ---------------
 
 
+# The caps below (MAX_NODES / MAX_EDGES / citations<=5) are stated in the
+# prompts but deliberately NOT enforced as schema max_length: the model treats
+# them as guidance and sometimes overshoots (e.g. 116 nodes against a cap of
+# 100), and a hard constraint would discard the whole multi-minute generation.
+# Overshoot is trimmed in `generate_mind_map` instead.
+
+
 class _NodeDraft(BaseModel):
     id: str = Field(description="Short stable slug, unique within the map.")
     label: str
     kind: str = Field(description="One of: concept, entity, person, event, claim.")
-    citations: list[_CitationDraft] = Field(min_length=1, max_length=5)
+    citations: list[_CitationDraft] = Field(
+        default_factory=list, description="1-5 citations grounding this node."
+    )
 
 
 class NodeExtractionResult(BaseModel):
-    nodes: list[_NodeDraft] = Field(min_length=1, max_length=MAX_NODES)
+    nodes: list[_NodeDraft] = Field(min_length=1)
 
 
 class _EdgeDraft(BaseModel):
     from_id: str = Field(alias="from")
     to_id: str = Field(alias="to")
     label: str
-    citations: list[_CitationDraft] = Field(min_length=1, max_length=5)
+    citations: list[_CitationDraft] = Field(
+        default_factory=list, description="1-5 citations grounding this edge."
+    )
 
     model_config = {"populate_by_name": True}
 
 
 class EdgeExtractionResult(BaseModel):
-    edges: list[_EdgeDraft] = Field(max_length=MAX_EDGES)
+    edges: list[_EdgeDraft]
 
 
 # ---- block construction -----------------------------------------------------
@@ -170,7 +182,7 @@ def _resolve_citation(draft: _CitationDraft, blocks: list[_Block]) -> MindMapCit
 
 
 def _resolve_citations(drafts: list[_CitationDraft], blocks: list[_Block]) -> list[MindMapCitation]:
-    resolved = [_resolve_citation(d, blocks) for d in drafts]
+    resolved = [_resolve_citation(d, blocks) for d in drafts[:MAX_CITATIONS_PER_ITEM]]
     return [c for c in resolved if c is not None]
 
 
@@ -221,7 +233,7 @@ async def generate_mind_map(parts: list[tuple[SourcePart, str | None]]) -> MindM
             kind=n.kind,
             citations=_resolve_citations(n.citations, blocks),
         )
-        for n in node_result.nodes
+        for n in node_result.nodes[:MAX_NODES]
     ]
     known_ids = {n.id for n in nodes}
     node_listing = "\n".join(f"- {n.id}: {n.label} ({n.kind})" for n in nodes)
@@ -246,7 +258,7 @@ async def generate_mind_map(parts: list[tuple[SourcePart, str | None]]) -> MindM
             label=e.label,
             citations=_resolve_citations(e.citations, blocks),
         )
-        for e in edge_result.edges
+        for e in edge_result.edges[:MAX_EDGES]
         if e.from_id in known_ids and e.to_id in known_ids
     ]
 
