@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PyNote — From PDF to Cited Answer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   === VIEWPORT BASE — fixed 1920×1080 stage, scaled to fit ===
+   The stage never re-flows: it scales uniformly (letterboxed
+   when needed) so slides look identical on every screen.
+   ============================================================ */
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; overflow:hidden; background:#05080D; }
+#viewport { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+#stage { width:1920px; height:1080px; flex:none; position:relative; overflow:hidden;
+         transform-origin:center center; background:#0B1119; color:#DCE7EE;
+         font-family:"Archivo", sans-serif; }
+
+/* Slide switching: visibility/opacity/pointer-events ONLY —
+   never display:none (layout classes would fight it). */
+.slide { position:absolute; inset:0; visibility:hidden; opacity:0; pointer-events:none;
+         transition:opacity .45s ease, visibility 0s linear .45s; }
+.slide.active { visibility:visible; opacity:1; pointer-events:auto; transition:opacity .45s ease; }
+
+/* ============================================================
+   === ATMOSPHERE — schematic grid + signal glows            ===
+   ============================================================ */
+#stage::before { content:""; position:absolute; inset:0; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 22% 14%, rgba(94,234,195,.06), transparent 65%),
+    radial-gradient(900px 600px at 85% 92%, rgba(255,176,76,.05), transparent 60%),
+    linear-gradient(rgba(220,231,238,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(220,231,238,.04) 1px, transparent 1px);
+  background-size:auto, auto, 60px 60px, 60px 60px; }
+
+/* ============================================================
+   === GLOBAL CHROME — frame, tags, progress, counter        ===
+   ============================================================ */
+.frame { position:absolute; inset:52px; border:1px solid rgba(220,231,238,.15); pointer-events:none; z-index:5; }
+.chrome-tag { position:absolute; z-index:6; font:500 18px/1 "IBM Plex Mono", monospace;
+  letter-spacing:.24em; text-transform:uppercase; color:#7E93A3; background:#0B1119; padding:0 16px; }
+#tag-deck { top:41px; left:110px; color:#5EEAC3; }
+#tag-section { top:41px; right:110px; }
+#tag-count { bottom:41px; right:110px; }
+#tag-hint { bottom:41px; left:110px; color:#54687A; }
+#progress { position:absolute; left:52px; right:52px; bottom:52px; height:3px; z-index:6;
+  background:rgba(220,231,238,.1); }
+#progress i { display:block; height:100%; width:0; background:linear-gradient(90deg,#5EEAC3,#FFB04C);
+  transition:width .4s ease; }
+
+/* ============================================================
+   === TYPE SYSTEM                                           ===
+   ============================================================ */
+.kicker { font:600 22px/1 "IBM Plex Mono", monospace; letter-spacing:.3em;
+  text-transform:uppercase; color:#FFB04C; }
+h2.headline { font:900 84px/1.02 "Archivo", sans-serif; letter-spacing:-.02em;
+  text-transform:uppercase; color:#DCE7EE; }
+h2.headline .hl { color:#5EEAC3; }
+h2.headline .amb { color:#FFB04C; }
+.lede { font:500 30px/1.5 "Archivo", sans-serif; color:#9FB2C0; }
+.lede b, .lede strong { color:#DCE7EE; }
+.mono { font-family:"IBM Plex Mono", monospace; }
+
+/* Standard slide scaffold: header band + content zone */
+.s-head { position:absolute; left:150px; top:130px; right:150px; }
+.s-head .kicker { margin-bottom:22px; }
+.s-body { position:absolute; left:150px; right:150px; top:330px; bottom:150px; }
+
+/* ============================================================
+   === REVEAL ANIMATION — staggered via --d, runs on .active ===
+   ============================================================ */
+.rv { opacity:0; }
+.active .rv { animation:rise .65s cubic-bezier(.2,.7,.2,1) both; animation-delay:var(--d, 0s); }
+@keyframes rise { from { opacity:0; transform:translateY(26px); } to { opacity:1; transform:none; } }
+@keyframes flow { from { left:0; opacity:1; } 90% { opacity:1; } to { left:calc(100% - 8px); opacity:0; } }
+
+/* ============================================================
+   === COMPONENTS                                            ===
+   ============================================================ */
+/* --- pipeline nodes + animated links --- */
+.pipe { display:flex; align-items:center; }
+.node { font:600 24px/1 "IBM Plex Mono", monospace; color:#DCE7EE; text-align:left;
+  border:1.5px solid rgba(94,234,195,.55); padding:22px 28px; background:rgba(94,234,195,.05); }
+.node small { display:block; margin-top:9px; font:400 16px/1.3 "IBM Plex Mono", monospace; color:#7E93A3; }
+.node.hot { border-color:#FFB04C; background:rgba(255,176,76,.07); }
+.node.dim { border-color:rgba(220,231,238,.3); background:rgba(220,231,238,.03); color:#9FB2C0; }
+.link { width:60px; height:1.5px; background:rgba(220,231,238,.35); position:relative; flex:none; }
+.active .link::after { content:""; position:absolute; top:-3.25px; left:0; width:8px; height:8px;
+  background:#5EEAC3; border-radius:50%; animation:flow 2.2s linear infinite; }
+
+/* --- card grid --- */
+.grid { display:grid; gap:28px; }
+.card { border:1px solid rgba(220,231,238,.18); background:rgba(220,231,238,.03); padding:34px 36px; }
+.card h3 { font:700 30px/1.2 "Archivo", sans-serif; color:#DCE7EE; margin-bottom:14px; }
+.card h3 .idx { color:#5EEAC3; font:600 22px/1 "IBM Plex Mono", monospace; margin-right:14px; }
+.card p { font:500 23px/1.5 "Archivo", sans-serif; color:#9FB2C0; }
+.card p b { color:#DCE7EE; }
+.card.accent { border-color:rgba(94,234,195,.5); background:rgba(94,234,195,.05); }
+.card.warn { border-color:rgba(255,176,76,.5); background:rgba(255,176,76,.05); }
+
+/* --- data table --- */
+table.data { width:100%; border-collapse:collapse; font:500 24px/1.4 "Archivo", sans-serif; }
+table.data th { font:600 19px/1 "IBM Plex Mono", monospace; letter-spacing:.18em; text-transform:uppercase;
+  color:#5EEAC3; text-align:left; padding:0 26px 16px 26px; border-bottom:1.5px solid rgba(94,234,195,.4); }
+table.data td { padding:20px 26px; color:#9FB2C0; border-bottom:1px solid rgba(220,231,238,.1);
+  vertical-align:top; }
+table.data td:first-child { color:#DCE7EE; font-weight:700; white-space:nowrap; }
+table.data td .m { font:500 21px/1.4 "IBM Plex Mono", monospace; color:#FFB04C; }
+
+/* --- code block --- */
+.code { border:1px solid rgba(220,231,238,.18); background:#080D14; padding:28px 32px;
+  font:500 22px/1.65 "IBM Plex Mono", monospace; color:#9FB2C0; white-space:pre; }
+.code .g { color:#5EEAC3; } .code .a { color:#FFB04C; } .code .c { color:#54687A; }
+.code .w { color:#DCE7EE; }
+
+/* --- stat tile --- */
+.stat { text-align:left; }
+.stat .n { font:900 92px/1 "Archivo", sans-serif; color:#5EEAC3; letter-spacing:-.02em; }
+.stat .n.amb { color:#FFB04C; }
+.stat .l { margin-top:12px; font:500 21px/1.4 "IBM Plex Mono", monospace; color:#7E93A3; }
+
+/* --- vertical list rows --- */
+.rows .row { display:flex; gap:34px; align-items:baseline; padding:22px 0;
+  border-bottom:1px solid rgba(220,231,238,.1); }
+.rows .row .k { flex:none; width:330px; font:600 24px/1.35 "IBM Plex Mono", monospace; color:#5EEAC3; }
+.rows .row .v { font:500 26px/1.5 "Archivo", sans-serif; color:#9FB2C0; }
+.rows .row .v b { color:#DCE7EE; }
+
+/* --- big quote / statement --- */
+.statement { font:900 64px/1.15 "Archivo", sans-serif; text-transform:uppercase; letter-spacing:-.01em; }
+
+/* --- inline SVG diagrams (use case · architecture) --- */
+svg.diagram { width:100%; height:100%; display:block; }
+.diagram .box { fill:rgba(94,234,195,.05); stroke:#5EEAC3; stroke-width:1.5; }
+.diagram .box.hot { fill:rgba(255,176,76,.07); stroke:#FFB04C; }
+.diagram .box.dim { fill:rgba(220,231,238,.03); stroke:rgba(220,231,238,.35); }
+.diagram .actor { fill:rgba(220,231,238,.05); stroke:#DCE7EE; stroke-width:1.5; }
+.diagram .boundary { fill:none; stroke:rgba(220,231,238,.3); stroke-dasharray:4 7; }
+.diagram text { font:500 21px "IBM Plex Mono", monospace; fill:#DCE7EE; }
+.diagram text.small { font-size:16px; fill:#7E93A3; }
+.diagram text.lbl { font-size:16px; fill:#5EEAC3; letter-spacing:.12em; }
+.diagram text.elbl { font-size:16px; fill:#9FB2C0; }
+.diagram line.edge, .diagram path.edge { stroke:#7E93A3; stroke-width:1.5; fill:none; }
+.diagram .dash { stroke-dasharray:7 7; }
+
+/* --- full-RAG-map panel grid --- */
+.map-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:26px; align-content:start; }
+.mcard { position:relative; border:1.5px solid; padding:24px 28px; background:rgba(220,231,238,.02); }
+.mcard h4 { font:700 24px/1.15 "Archivo", sans-serif; letter-spacing:.02em; text-transform:uppercase; margin-bottom:12px; }
+.mcard p { font:400 18px/1.55 "IBM Plex Mono", monospace; color:#9FB2C0; }
+.mcard .st { position:absolute; top:22px; right:22px; width:16px; height:16px; border-radius:50%; }
+.st-ok { background:#5EEAC3; } .st-part { background:#FFB04C; } .st-miss { background:#FF6B5E; }
+.legend { position:absolute; right:0; top:52px; font:500 20px/1 "IBM Plex Mono", monospace; color:#9FB2C0; }
+.legend i { display:inline-block; width:14px; height:14px; border-radius:50%; margin:0 8px 0 26px; }
+
+/* ============================================================
+   === EDIT MODE (press E · Ctrl+S saves a copy)             ===
+   ============================================================ */
+body.editing .slide.active { outline:3px dashed rgba(255,176,76,.6); outline-offset:-3px; }
+body.editing [contenteditable="true"]:hover { background:rgba(255,176,76,.12); cursor:text; }
+#editbadge { position:fixed; top:14px; left:14px; z-index:99; display:none;
+  font:600 13px/1 "IBM Plex Mono", monospace; letter-spacing:.15em; color:#0B1119;
+  background:#FFB04C; padding:8px 12px; border-radius:4px; }
+body.editing #editbadge { display:block; }
+
+/* ============================================================
+   === REDUCED MOTION                                        ===
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration:.01ms !important; animation-delay:0ms !important;
+    animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+}
+</style>
+</head>
+<body>
+<div id="editbadge">EDIT MODE — CTRL+S TO SAVE</div>
+<div id="viewport">
+<div id="stage">
+  <div class="frame"></div>
+  <div class="chrome-tag" id="tag-deck">PyNote — RAG course report</div>
+  <div class="chrome-tag" id="tag-section">orientation</div>
+  <div class="chrome-tag" id="tag-hint">← → navigate · E edit</div>
+  <div class="chrome-tag" id="tag-count">01 / 24</div>
+  <div id="progress"><i></i></div>
+
+  <!-- ================= SLIDE 1 — TITLE ================= -->
+  <section class="slide" data-section="orientation">
+    <div class="kicker rv" style="position:absolute;left:160px;top:200px;--d:.1s">Course report · Retrieval-Augmented Generation</div>
+    <h1 class="rv" style="position:absolute;left:154px;top:270px;width:1540px;font:900 138px/1.04 Archivo,sans-serif;letter-spacing:-.02em;text-transform:uppercase;--d:.25s">
+      From PDF to<br><span style="color:#5EEAC3">cited answer</span></h1>
+    <div class="pipe rv" style="position:absolute;left:160px;top:660px;--d:.55s">
+      <div class="node">PARSE<small>PyMuPDF</small></div><div class="link"></div>
+      <div class="node">EMBED<small>BGE · 384-d</small></div><div class="link"></div>
+      <div class="node">RETRIEVE<small>hybrid RRF</small></div><div class="link"></div>
+      <div class="node hot">GENERATE<small>citations API</small></div>
+    </div>
+    <p class="lede rv" style="position:absolute;left:160px;top:880px;width:1300px;--d:.75s">
+      PyNote — a retrieval-augmented generation system for question answering over PDF documents, <b>with verifiable citations.</b></p>
+  </section>
+
+  <!-- ================= SLIDE 2 — AGENDA ================= -->
+  <section class="slide" data-section="orientation">
+    <div class="s-head">
+      <div class="kicker rv">Overview</div>
+      <h2 class="headline rv" style="--d:.1s">Report <span class="hl">outline</span></h2>
+    </div>
+    <div class="s-body grid" style="grid-template-columns:1fr 1fr 1fr; align-content:start;">
+      <div class="card rv" style="--d:.2s"><h3><span class="idx">01</span>Background</h3><p>Why language models require retrieval; the definition of grounded generation.</p></div>
+      <div class="card rv" style="--d:.3s"><h3><span class="idx">02</span>Ingestion</h3><p>PDF → normalized text → structure-aware chunks → vector index. Runs once per document.</p></div>
+      <div class="card rv" style="--d:.4s"><h3><span class="idx">03</span>Retrieval</h3><p>Hybrid search: dense + sparse retrieval, rank fusion, reranking, deduplication.</p></div>
+      <div class="card rv" style="--d:.5s"><h3><span class="idx">04</span>Generation</h3><p>Constrained generation with the Citations API; character-offset citation verification.</p></div>
+      <div class="card rv" style="--d:.6s"><h3><span class="idx">05</span>Frameworks</h3><p>LangChain / LangGraph, LangSmith, and Ragas — orchestration, observability, evaluation.</p></div>
+      <div class="card rv" style="--d:.7s"><h3><span class="idx">06</span>Analysis</h3><p>Comparison against a reference RAG architecture; limitations and future work.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 3 — THE PROBLEM ================= -->
+  <section class="slide" data-section="01 · background">
+    <div class="s-head">
+      <div class="kicker rv">01 · Background</div>
+      <h2 class="headline rv" style="--d:.1s">Problem <span class="amb">statement</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;">
+        <div class="card rv" style="--d:.2s"><h3>Knowledge cutoff</h3><p>Training data ends at a fixed date. Private and recent documents are <b>not part of the model.</b></p></div>
+        <div class="card rv" style="--d:.35s"><h3>Context limits</h3><p>Full documents do not fit in a prompt. Relevant passages must be <b>selected automatically.</b></p></div>
+        <div class="card rv" style="--d:.5s"><h3>Hallucination</h3><p>Beyond its knowledge, a model generates fluent but unsupported text. Without sources, <b>errors are undetectable.</b></p></div>
+      </div>
+      <p class="lede rv" style="margin-top:56px; font-size:34px; --d:.7s">
+        <span class="mono" style="color:#5EEAC3">RAG</span> — Retrieval-Augmented Generation — addresses all three:
+        <b>retrieve relevant passages first, then constrain the model to answer only from them.</b></p>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 4 — RAG IN ONE DIAGRAM ================= -->
+  <section class="slide" data-section="01 · background">
+    <div class="s-head">
+      <div class="kicker rv">01 · Background</div>
+      <h2 class="headline rv" style="--d:.1s">Method <span class="hl">overview</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="pipe rv" style="--d:.25s">
+        <div class="node dim">QUESTION<small>"what does §3.2 say?"</small></div><div class="link"></div>
+        <div class="node">SEARCH<small>your document index</small></div><div class="link"></div>
+        <div class="node">TOP PASSAGES<small>the evidence</small></div><div class="link"></div>
+        <div class="node hot">LLM<small>"answer ONLY from these"</small></div><div class="link"></div>
+        <div class="node dim">GROUNDED ANSWER<small>with sources</small></div>
+      </div>
+      <div class="rows" style="margin-top:64px;">
+        <div class="row rv" style="--d:.45s"><span class="k">principle</span><span class="v">The model does not need to <b>contain</b> the data — it needs the relevant data <b>in its prompt</b> at query time.</span></div>
+        <div class="row rv" style="--d:.6s"><span class="k">challenge</span><span class="v">The stages upstream of the model — parsing, chunking, indexing, search — <b>bound the quality</b> of every answer.</span></div>
+        <div class="row rv" style="--d:.75s"><span class="k">benefit</span><span class="v">Answers become <b>auditable</b> — every claim traces back to a source passage that can be checked.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 5 — MEET PYNOTE ================= -->
+  <section class="slide" data-section="01 · background">
+    <div class="s-head">
+      <div class="kicker rv">01 · Background</div>
+      <h2 class="headline rv" style="--d:.1s">The system: <span class="hl">PyNote</span></h2>
+    </div>
+    <div class="s-body">
+      <p class="lede rv" style="font-size:34px; width:1500px; --d:.2s">A NotebookLM-style research notebook:
+        <b>upload PDFs, ask questions, click any citation to jump to the exact source span.</b></p>
+      <table class="data" style="margin-top:52px;">
+        <tr class="rv" style="--d:.35s"><td>Upload → ready</td><td>parse → chunk → embed → outline, as background jobs <span class="m">apps/worker · arq</span></td></tr>
+        <tr class="rv" style="--d:.45s"><td>Ask anything</td><td>streaming chat over your notebook, follow-ups understood <span class="m">LangGraph · SSE</span></td></tr>
+        <tr class="rv" style="--d:.55s"><td>Click a citation</td><td>PDF viewer opens with the exact sentence highlighted <span class="m">react-pdf · Highlight API</span></td></tr>
+        <tr class="rv" style="--d:.65s"><td>Multi-tenant</td><td>org-scoped auth, cloud-deployable <span class="m">Clerk · Postgres</span></td></tr>
+        <tr class="rv" style="--d:.75s"><td>Ship gate</td><td>eval harness blocks deploys when citation grounding drops <span class="m">eval/run.py</span></td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 5b — USE CASES ================= -->
+  <section class="slide" data-section="01 · background">
+    <div class="s-head">
+      <div class="kicker rv">01 · Background</div>
+      <h2 class="headline rv" style="--d:.1s">Use case <span class="hl">diagram</span></h2>
+    </div>
+    <div class="s-body rv" style="--d:.3s">
+      <svg class="diagram" viewBox="0 0 1620 600" preserveAspectRatio="xMidYMin meet">
+        <defs>
+          <marker id="arrU" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#7E93A3"/>
+          </marker>
+        </defs>
+        <!-- system boundary -->
+        <rect class="boundary" x="340" y="10" width="1250" height="580"/>
+        <text class="lbl" x="364" y="46">PYNOTE — RAG NOTEBOOK</text>
+        <!-- actors -->
+        <rect class="actor" x="20" y="70" width="250" height="60" rx="30"/>
+        <text x="145" y="108" text-anchor="middle">👤 org admin</text>
+        <rect class="actor" x="20" y="270" width="250" height="60" rx="30"/>
+        <text x="145" y="308" text-anchor="middle">👤 researcher</text>
+        <rect class="actor" x="20" y="500" width="250" height="60" rx="30"/>
+        <text x="145" y="538" text-anchor="middle">⚙ worker</text>
+        <!-- use cases · user-facing -->
+        <rect class="box" x="400" y="150" width="390" height="60" rx="30"/>
+        <text x="595" y="188" text-anchor="middle">Upload PDF source</text>
+        <rect class="box hot" x="400" y="250" width="390" height="60" rx="30"/>
+        <text x="595" y="288" text-anchor="middle">Ask a question — chat</text>
+        <rect class="box hot" x="400" y="350" width="390" height="60" rx="30"/>
+        <text x="595" y="388" text-anchor="middle">Click citation → span</text>
+        <rect class="box" x="400" y="450" width="390" height="60" rx="30"/>
+        <text x="595" y="488" text-anchor="middle">Search · chips · summary</text>
+        <!-- use cases · admin + system -->
+        <rect class="box" x="1140" y="70" width="420" height="60" rx="30"/>
+        <text x="1350" y="108" text-anchor="middle">Manage notebooks &amp; org</text>
+        <rect class="box" x="1140" y="340" width="420" height="60" rx="30"/>
+        <text x="1350" y="378" text-anchor="middle">Parse · chunk · embed</text>
+        <rect class="box" x="1140" y="470" width="420" height="60" rx="30"/>
+        <text x="1350" y="508" text-anchor="middle">Outline &amp; mind map</text>
+        <!-- edges -->
+        <line class="edge" x1="270" y1="100" x2="1132" y2="100" marker-end="url(#arrU)"/>
+        <line class="edge" x1="270" y1="300" x2="392" y2="182" marker-end="url(#arrU)"/>
+        <line class="edge" x1="270" y1="300" x2="392" y2="280" marker-end="url(#arrU)"/>
+        <line class="edge" x1="270" y1="300" x2="392" y2="378" marker-end="url(#arrU)"/>
+        <line class="edge" x1="270" y1="300" x2="392" y2="475" marker-end="url(#arrU)"/>
+        <line class="edge dash" x1="795" y1="180" x2="1132" y2="355" marker-end="url(#arrU)"/>
+        <text class="elbl" x="930" y="248">« triggers »</text>
+        <line class="edge dash" x1="1350" y1="404" x2="1350" y2="462" marker-end="url(#arrU)"/>
+        <text class="elbl" x="1372" y="440">« then »</text>
+        <path class="edge" d="M 270 530 L 1060 530 L 1060 372 L 1132 372" marker-end="url(#arrU)"/>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 6 — SYSTEM MAP ================= -->
+  <section class="slide" data-section="01 · background">
+    <div class="s-head">
+      <div class="kicker rv">01 · Background</div>
+      <h2 class="headline rv" style="--d:.1s">System <span class="hl">architecture</span></h2>
+    </div>
+    <div class="s-body rv" style="--d:.3s">
+      <svg class="diagram" viewBox="0 0 1620 620" preserveAspectRatio="xMidYMin meet">
+        <defs>
+          <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#7E93A3"/>
+          </marker>
+        </defs>
+        <!-- application tier -->
+        <rect class="box" x="30" y="30" width="330" height="100"/>
+        <text x="195" y="72" text-anchor="middle">apps/web — Next.js</text>
+        <text class="small" x="195" y="102" text-anchor="middle">Clerk auth · react-pdf viewer</text>
+        <rect class="box" x="560" y="30" width="370" height="100"/>
+        <text x="745" y="72" text-anchor="middle">apps/api — FastAPI</text>
+        <text class="small" x="745" y="102" text-anchor="middle">chat SSE · search · summary</text>
+        <rect class="box" x="560" y="250" width="370" height="120"/>
+        <text x="745" y="290" text-anchor="middle">LangGraph chat_graph</text>
+        <text class="small" x="745" y="318" text-anchor="middle">rewrite → retrieve →</text>
+        <text class="small" x="745" y="344" text-anchor="middle">generate → map_citations</text>
+        <rect class="box" x="30" y="250" width="330" height="110"/>
+        <text x="195" y="292" text-anchor="middle">apps/worker — arq</text>
+        <text class="small" x="195" y="322" text-anchor="middle">parse → embed → outline</text>
+        <!-- data tier -->
+        <rect class="box dim" x="30" y="460" width="230" height="90"/>
+        <text x="145" y="500" text-anchor="middle">Redis</text>
+        <text class="small" x="145" y="528" text-anchor="middle">arq queue</text>
+        <rect class="box hot" x="310" y="460" width="380" height="110"/>
+        <text x="500" y="502" text-anchor="middle">Postgres 16</text>
+        <text class="small" x="500" y="532" text-anchor="middle">pgvector · tsvector · checkpoints</text>
+        <rect class="box dim" x="740" y="460" width="250" height="90"/>
+        <text x="865" y="500" text-anchor="middle">MinIO / R2</text>
+        <text class="small" x="865" y="528" text-anchor="middle">raw PDF bytes</text>
+        <!-- providers -->
+        <text class="lbl" x="1150" y="24">EXTERNAL PROVIDERS</text>
+        <rect class="box hot" x="1150" y="40" width="440" height="90"/>
+        <text x="1370" y="80" text-anchor="middle">Claude — Citations API</text>
+        <text class="small" x="1370" y="108" text-anchor="middle">grounded generation</text>
+        <rect class="box dim dash" x="1150" y="190" width="440" height="70"/>
+        <text x="1370" y="232" text-anchor="middle">Voyage rerank-2.5 · optional</text>
+        <rect class="box dim dash" x="1150" y="330" width="440" height="70"/>
+        <text x="1370" y="372" text-anchor="middle">Gemini Flash — outline</text>
+        <rect class="box dim dash" x="1150" y="470" width="440" height="70"/>
+        <text x="1370" y="512" text-anchor="middle">LangSmith — traces · optional</text>
+        <!-- edges -->
+        <line class="edge" x1="360" y1="80" x2="552" y2="80" marker-end="url(#arrA)"/>
+        <text class="elbl" x="380" y="62">Clerk JWT · SSE</text>
+        <line class="edge" x1="745" y1="130" x2="745" y2="242" marker-end="url(#arrA)"/>
+        <text class="elbl" x="762" y="195">per question</text>
+        <path class="edge" d="M 620 130 L 620 190 L 430 190 L 430 420 L 145 420 L 145 452" marker-end="url(#arrA)"/>
+        <text class="elbl" x="444" y="310">enqueue</text>
+        <line class="edge" x1="145" y1="460" x2="145" y2="368" marker-end="url(#arrA)"/>
+        <text class="elbl" x="162" y="422">jobs</text>
+        <line class="edge" x1="330" y1="360" x2="440" y2="452" marker-end="url(#arrA)"/>
+        <line class="edge" x1="360" y1="300" x2="732" y2="466" marker-end="url(#arrA)"/>
+        <line class="edge" x1="700" y1="370" x2="580" y2="452" marker-end="url(#arrA)"/>
+        <text class="elbl" x="655" y="430">RRF · ckpts</text>
+        <line class="edge" x1="930" y1="280" x2="1142" y2="95" marker-end="url(#arrA)"/>
+        <text class="elbl" x="1005" y="170">search_result</text>
+        <line class="edge dash" x1="930" y1="310" x2="1142" y2="222" marker-end="url(#arrA)"/>
+        <text class="elbl" x="1030" y="258">rerank top-50</text>
+        <line class="edge dash" x1="930" y1="350" x2="1142" y2="498" marker-end="url(#arrA)"/>
+        <text class="elbl" x="1015" y="440">auto-trace</text>
+        <path class="edge dash" d="M 360 335 L 480 425 L 1010 425 L 1142 368" marker-end="url(#arrA)"/>
+        <text class="elbl" x="790" y="412">outline</text>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 7 — TWO PIPELINES ================= -->
+  <section class="slide" data-section="02 · ingestion">
+    <div class="s-head">
+      <div class="kicker rv">02 · Ingestion</div>
+      <h2 class="headline rv" style="--d:.1s">Two pipelines: <span class="hl">ingestion & query</span></h2>
+    </div>
+    <div class="s-body grid" style="grid-template-columns:1fr 1fr; align-content:start;">
+      <div class="card accent rv" style="--d:.25s; padding:44px 46px;">
+        <h3 style="font-size:36px;">INGEST — once per document</h3>
+        <p style="font-size:26px; margin-top:10px;">Offline, in the worker. Can afford to be slow and thorough.</p>
+        <div class="code" style="margin-top:30px; border:none; background:rgba(8,13,20,.75);">
+<span class="c"># apps/worker — arq jobs</span>
+<span class="g">parse_source</span>    <span class="c">PDF → clean page text</span>
+<span class="g">embed_source</span>    <span class="c">chunk → vectors → index</span>
+<span class="g">outline_source</span>  <span class="c">suggested questions</span></div>
+      </div>
+      <div class="card warn rv" style="--d:.45s; padding:44px 46px;">
+        <h3 style="font-size:36px;">QUERY — every question</h3>
+        <p style="font-size:26px; margin-top:10px;">Live, user waiting. Every millisecond and token counts.</p>
+        <div class="code" style="margin-top:30px; border:none; background:rgba(8,13,20,.75);">
+<span class="c"># packages/core — LangGraph</span>
+<span class="a">rewrite</span>   <span class="c">follow-up → standalone query</span>
+<span class="a">retrieve</span>  <span class="c">hybrid RRF → rerank → top 8</span>
+<span class="a">generate</span>  <span class="c">Claude + citations, streamed</span>
+<span class="a">map_citations</span> <span class="c">offsets → source spans</span></div>
+      </div>
+      <p class="lede rv" style="grid-column:1/-1; font-size:30px; --d:.65s">
+        Answer quality is determined <b>at ingestion time</b>; response latency <b>at query time.</b> The two are engineered separately.</p>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 7b — INGESTION AT A GLANCE ================= -->
+  <section class="slide" data-section="02 · ingestion">
+    <div class="s-head">
+      <div class="kicker rv">02 · Ingestion</div>
+      <h2 class="headline rv" style="--d:.1s">Ingestion pipeline: <span class="hl">overview</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="pipe rv" style="--d:.25s">
+        <div class="node dim">PDF UPLOAD<small>bytes → MinIO / R2</small></div><div class="link"></div>
+        <div class="node">PARSE_SOURCE<small>PyMuPDF · hygiene · headings</small></div><div class="link"></div>
+        <div class="node dim">SOURCE_PART<small>clean text + heading offsets</small></div>
+      </div>
+      <div class="pipe rv" style="margin-top:54px; --d:.45s">
+        <div class="node hot">CHUNK<small>paragraphs · sentences · cuts</small></div><div class="link"></div>
+        <div class="node hot">EMBED<small>BGE 384-d · title › section</small></div><div class="link"></div>
+        <div class="node dim">CHUNK TABLE<small>HNSW dense · GIN sparse</small></div><div class="link"></div>
+        <div class="node">OUTLINE<small>suggested questions</small></div>
+      </div>
+      <div class="rows" style="margin-top:54px;">
+        <div class="row rv" style="--d:.65s"><span class="k">offsets all the way</span><span class="v">Every artifact keeps <b>char offsets into its parent</b> — the thread citations later walk back along.</span></div>
+        <div class="row rv" style="--d:.8s"><span class="k">idempotent</span><span class="v">Re-running any job clears and rebuilds its own outputs — <b>re-ingesting is always safe.</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 8 — PARSE ================= -->
+  <section class="slide" data-section="02 · ingestion">
+    <div class="s-head">
+      <div class="kicker rv">02 · Ingestion — step 1</div>
+      <h2 class="headline rv" style="--d:.1s">Step 1 — parsing & <span class="hl">normalization</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="rows">
+        <div class="row rv" style="--d:.2s"><span class="k">extract</span><span class="v">PyMuPDF reads each page in natural order → one <span class="mono" style="color:#5EEAC3">source_part</span> per page, char offsets preserved.</span></div>
+        <div class="row rv" style="--d:.35s"><span class="k">strip boilerplate</span><span class="v">Edge lines repeating on &gt;60% of pages — running titles, <b>"Page 3"</b> — are chrome, not content. They'd pollute every chunk's embedding.</span></div>
+        <div class="row rv" style="--d:.5s"><span class="k">de-hyphenate</span><span class="v"><span class="mono">improve-\nment → improvement</span> — split words hide from both keyword and vector search.</span></div>
+        <div class="row rv" style="--d:.65s"><span class="k">detect structure</span><span class="v">Font metadata reveals headings: <b>short line, noticeably larger than body text</b> → a heading, with its level and char offset. <span class="mono" style="color:#FFB04C">(new)</span></span></div>
+      </div>
+      <p class="lede rv" style="margin-top:52px; --d:.8s">Every downstream stage inherits parsing quality — <b>normalization is performed once, at ingestion.</b></p>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 9 — HEADING DETECTION ================= -->
+  <section class="slide" data-section="02 · ingestion">
+    <div class="s-head">
+      <div class="kicker rv">02 · Ingestion — step 1½</div>
+      <h2 class="headline rv" style="--d:.1s">Heading <span class="hl">detection</span></h2>
+    </div>
+    <div class="s-body grid" style="grid-template-columns:1.1fr .9fr; gap:60px; align-content:start;">
+      <div class="code rv" style="--d:.25s; font-size:24px;">
+<span class="c"># body size = the font size carrying</span>
+<span class="c"># the most characters in the document</span>
+<span class="w">body</span> = weights.most_common(1)
+
+<span class="c"># heading = short line, ≥12% larger</span>
+<span class="c"># (or bold at body size)</span>
+<span class="g">if</span> len(line) ≤ 100 <span class="g">and</span> size ≥ body × <span class="a">1.12</span>:
+    heading(level=<span class="a">rank_of(size)</span>,
+            start=<span class="a">char_offset</span>)</div>
+      <div>
+        <div class="rows">
+          <div class="row rv" style="--d:.4s"><span class="k" style="width:250px;">no ML, no deps</span><span class="v">Pure font statistics — <b>zero new dependencies</b>, CPU-only, runs at parse speed.</span></div>
+          <div class="row rv" style="--d:.55s"><span class="k" style="width:250px;">levels for free</span><span class="v">Distinct heading sizes rank into levels: biggest font → <span class="mono">level 1</span>.</span></div>
+          <div class="row rv" style="--d:.7s"><span class="k" style="width:250px;">offsets matter</span><span class="v">Each heading is located in the cleaned text — its <b>char offset</b> becomes a hard chunk boundary next step.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 10 — CHUNKING ================= -->
+  <section class="slide" data-section="02 · ingestion">
+    <div class="s-head">
+      <div class="kicker rv">02 · Ingestion — step 2</div>
+      <h2 class="headline rv" style="--d:.1s">Step 2 — structure-aware <span class="hl">chunking</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;">
+        <div class="card rv" style="--d:.2s"><h3><span class="idx">1</span>Paragraphs pack</h3><p>Blank-line blocks pack greedily to <span class="mono" style="color:#5EEAC3">~1200 chars</span> (≈300 tokens). Chunks start and end on paragraph edges.</p></div>
+        <div class="card rv" style="--d:.35s"><h3><span class="idx">2</span>Sentences split</h3><p>A paragraph too big to fit splits at <b>sentence ends</b> — never mid-thought. Whitespace windows only as last resort.</p></div>
+        <div class="card rv" style="--d:.5s"><h3><span class="idx">3</span>Headings cut hard</h3><p>No chunk ever spans a section boundary — <b>a retrieval hit never mixes two sections.</b></p></div>
+      </div>
+      <div class="card accent rv" style="margin-top:44px; --d:.7s">
+        <h3>The citation contract — the invariant everything hangs on</h3>
+        <p style="font:500 26px/1.6 'IBM Plex Mono',monospace; margin-top:8px;">
+          <span style="color:#5EEAC3">source_text[chunk.char_start : chunk.char_end] == chunk.text</span></p>
+        <p style="margin-top:12px;">Every chunk is an exact slice of its page. Break this, and citations point at the wrong words. <b>1,300 randomized tests enforce it.</b></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 11 — EMBEDDINGS ================= -->
+  <section class="slide" data-section="02 · ingestion">
+    <div class="s-head">
+      <div class="kicker rv">02 · Ingestion — step 3</div>
+      <h2 class="headline rv" style="--d:.1s">Step 3 — semantic <span class="hl">embeddings</span></h2>
+    </div>
+    <div class="s-body grid" style="grid-template-columns:.9fr 1.1fr; gap:60px; align-content:start;">
+      <div>
+        <div class="stat rv" style="--d:.2s"><div class="n">384<span style="font-size:44px;color:#7E93A3;">-dim</span></div>
+          <div class="l">BAAI/bge-small-en-v1.5 · fastembed ONNX<br>local, CPU-only, $0 per token</div></div>
+        <div class="rows" style="margin-top:40px;">
+          <div class="row rv" style="--d:.4s"><span class="k" style="width:240px;">asymmetric</span><span class="v">Queries get BGE's <b>instruction prefix</b>; documents don't. Same space, better matches.</span></div>
+          <div class="row rv" style="--d:.55s"><span class="k" style="width:240px;">near = similar</span><span class="v">"car" retrieves "automobile" — <b>paraphrase-proof</b>, which keywords never are.</span></div>
+        </div>
+      </div>
+      <div class="card accent rv" style="--d:.5s; padding:44px 46px;">
+        <h3>Contextual embeddings — embed enriched, store raw</h3>
+        <div class="code" style="margin-top:24px; border:none; background:rgba(8,13,20,.75); font-size:23px;">
+<span class="c"># fed to the embedder + tsvector:</span>
+<span class="a">"Attention Is All You Need &gt; 3 Methods
+ &gt; 3.2 Training"</span> + chunk text
+
+<span class="c"># stored in chunk.text:</span>
+<span class="w">the raw slice only</span>  <span class="c">← citation contract</span></div>
+        <p style="margin-top:24px;">Orphan chunks carry document + section identity into vector space — <b>without touching the cited text.</b></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 12 — STORAGE ================= -->
+  <section class="slide" data-section="02 · ingestion">
+    <div class="s-head">
+      <div class="kicker rv">02 · Ingestion — step 4</div>
+      <h2 class="headline rv" style="--d:.1s">Step 4 — storage & <span class="hl">indexing</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="code rv" style="--d:.25s; font-size:24px;">
+<span class="c">-- the chunk table, heart of retrieval</span>
+<span class="w">text</span>        <span class="c">the raw slice (citation contract)</span>
+<span class="w">embedding</span>   vector(384)  <span class="g">→ HNSW index, cosine</span>   <span class="c">-- dense / semantic</span>
+<span class="w">tsv</span>         tsvector     <span class="g">→ GIN index, weighted</span>  <span class="c">-- sparse / keyword</span>
+<span class="w">meta</span>        {page, source_title, <span class="a">section_path</span>}
+<span class="w">char_start, char_end</span>     <span class="c">-- offsets into the source page</span></div>
+      <div class="rows" style="margin-top:56px;">
+        <div class="row rv" style="--d:.45s"><span class="k">why both?</span><span class="v">Vectors catch <b>paraphrase</b>; keywords catch <b>exact terms</b> — part numbers, names, acronyms that embeddings fumble.</span></div>
+        <div class="row rv" style="--d:.6s"><span class="k">why weighted?</span><span class="v">Body text indexes at weight <span class="mono">A</span>, title + section path at <span class="mono">B</span> — a heading keyword helps, but a <b>body match wins.</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 13 — QUERY PIPELINE ================= -->
+  <section class="slide" data-section="03 · retrieval">
+    <div class="s-head">
+      <div class="kicker rv">03 · Retrieval</div>
+      <h2 class="headline rv" style="--d:.1s">Query pipeline <span class="hl">(LangGraph)</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="pipe rv" style="--d:.25s">
+        <div class="node">REWRITE<small>follow-up → standalone</small></div><div class="link"></div>
+        <div class="node">RETRIEVE<small>hybrid + rerank + dedup</small></div><div class="link"></div>
+        <div class="node hot">GENERATE<small>Claude · streamed</small></div><div class="link"></div>
+        <div class="node">MAP_CITATIONS<small>offsets → chunks</small></div>
+      </div>
+      <div class="rows" style="margin-top:60px;">
+        <div class="row rv" style="--d:.45s"><span class="k">LangGraph</span><span class="v">The pipeline is a <b>state machine</b>: typed state flows through nodes; each node does one job and returns a delta.</span></div>
+        <div class="row rv" style="--d:.6s"><span class="k">checkpointed</span><span class="v">Every turn persists to Postgres (<span class="mono">AsyncPostgresSaver</span>) keyed by thread — <b>reload the page, the conversation replays.</b></span></div>
+        <div class="row rv" style="--d:.75s"><span class="k">streaming</span><span class="v">Callers stream with <span class="mono">stream_mode="messages"</span> — tokens flow to the browser over SSE <b>while the graph runs.</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 14 — REWRITE ================= -->
+  <section class="slide" data-section="03 · retrieval">
+    <div class="s-head">
+      <div class="kicker rv">03 · Retrieval — node 1</div>
+      <h2 class="headline rv" style="--d:.1s">Query <span class="hl">rewriting</span></h2>
+    </div>
+    <div class="s-body grid" style="grid-template-columns:1fr 1fr; gap:60px; align-content:start;">
+      <div class="card warn rv" style="--d:.2s; padding:44px 46px;">
+        <h3>Problem</h3>
+        <div class="code" style="margin-top:22px; border:none; background:rgba(8,13,20,.75); font-size:23px;">
+<span class="c">turn 1:</span> <span class="w">"what were the three findings?"</span>
+<span class="c">turn 2:</span> <span class="w">"tell me more about the second one"</span>
+
+<span class="c">searching for "the second one"</span>
+<span class="c">retrieves…</span> <span class="a">nothing useful.</span></div>
+      </div>
+      <div class="card accent rv" style="--d:.4s; padding:44px 46px;">
+        <h3>Approach</h3>
+        <div class="code" style="margin-top:22px; border:none; background:rgba(8,13,20,.75); font-size:23px;">
+<span class="c">cheap model + history →</span>
+<span class="g">"second finding: reranking improves
+ precision at low k"</span>
+
+<span class="c">now retrieval has something to bite.</span></div>
+      </div>
+      <p class="lede rv" style="grid-column:1/-1; font-size:30px; --d:.6s">
+        Best-effort by design: turn 1 passes through untouched, and <b>any failure falls back to the raw question</b> — the rewrite may improve a turn, never break one.</p>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 15 — HYBRID RETRIEVAL ================= -->
+  <section class="slide" data-section="03 · retrieval">
+    <div class="s-head">
+      <div class="kicker rv">03 · Retrieval — node 2</div>
+      <h2 class="headline rv" style="--d:.1s">Hybrid retrieval <span class="hl">with RRF</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="code rv" style="--d:.25s; font-size:23px;">
+<span class="c">-- one CTE, one round-trip</span>
+<span class="g">dense</span>  : ORDER BY embedding <span class="a">&lt;=&gt;</span> query_vec           <span class="c">-- pgvector cosine, top 50</span>
+<span class="g">sparse</span> : WHERE tsv @@ websearch_to_tsquery(query)   <span class="c">-- keyword match, top 50</span>
+<span class="g">fused</span>  : SUM(<span class="a">1.0 / (60 + rank)</span>)                     <span class="c">-- Reciprocal Rank Fusion</span></div>
+      <div class="rows" style="margin-top:40px;">
+        <div class="row rv" style="--d:.45s"><span class="k">why RRF?</span><span class="v">Similarity scores live on incomparable scales — <b>ranks compare.</b> High on <b>either</b> list → surfaces.</span></div>
+        <div class="row rv" style="--d:.6s"><span class="k">why 60?</span><span class="v">Standard damping — softens rank 1 vs rank 10, so neither list dominates.</span></div>
+        <div class="row rv" style="--d:.75s"><span class="k">scoped</span><span class="v">Every arm filters <span class="mono">notebook_id</span> first — <b>tenant isolation lives in the query.</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 16 — THE FUNNEL ================= -->
+  <section class="slide" data-section="03 · retrieval">
+    <div class="s-head">
+      <div class="kicker rv">03 · Retrieval — node 2, continued</div>
+      <h2 class="headline rv" style="--d:.1s">The retrieval <span class="hl">funnel</span></h2>
+    </div>
+    <div class="s-body">
+      <div style="display:flex; gap:80px; align-items:flex-start;">
+        <div class="stat rv" style="--d:.2s"><div class="n">50</div><div class="l">candidates<br>hybrid RRF, cheap &amp; wide</div></div>
+        <div class="stat rv" style="--d:.35s"><div class="n">12</div><div class="l">reranked<br>Voyage rerank-2.5 cross-encoder</div></div>
+        <div class="stat rv" style="--d:.5s"><div class="n">8</div><div class="l">packed<br>after overlap dedup</div></div>
+        <div class="stat rv" style="--d:.65s"><div class="n amb">1</div><div class="l">answer<br>with citations</div></div>
+      </div>
+      <div class="rows" style="margin-top:64px;">
+        <div class="row rv" style="--d:.8s"><span class="k">cheap → expensive</span><span class="v">Each stage spends more per item on fewer items: SQL scores thousands, the cross-encoder reads <b>full query × chunk pairs</b> for just 50.</span></div>
+        <div class="row rv" style="--d:.95s"><span class="k">graceful degradation</span><span class="v">No Voyage key? The funnel skips reranking and packs top hybrid hits — <b>optional stages fail open.</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 17 — GENERATE ================= -->
+  <section class="slide" data-section="04 · generation">
+    <div class="s-head">
+      <div class="kicker rv">04 · Generation</div>
+      <h2 class="headline rv" style="--d:.1s">Grounded <span class="amb">generation</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="rows">
+        <div class="row rv" style="--d:.2s"><span class="k">search_result blocks</span><span class="v">The 8 chunks reach Claude as native content — the <b>Citations API</b> marks which characters support each sentence.</span></div>
+        <div class="row rv" style="--d:.35s"><span class="k">grounding prompt</span><span class="v"><span class="mono">"Answer using ONLY the provided search results… if the answer isn't there, say so."</span></span></div>
+        <div class="row rv" style="--d:.5s"><span class="k">prompt caching</span><span class="v">Breakpoints cache the stable prefix across turns; <b>only fresh results + the new question pay full price.</b></span></div>
+        <div class="row rv" style="--d:.65s"><span class="k">history trimming</span><span class="v">The model sees a 12-message tail; <b>full history stays in checkpoints</b> for the UI.</span></div>
+      </div>
+      <p class="statement rv" style="margin-top:44px; font-size:54px; --d:.85s">Insufficient evidence → <span style="color:#FFB04C">the system reports "not found in the documents."</span></p>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 18 — CITATION ROUNDTRIP ================= -->
+  <section class="slide" data-section="04 · generation">
+    <div class="s-head">
+      <div class="kicker rv">04 · Generation</div>
+      <h2 class="headline rv" style="--d:.1s">Citation <span class="hl">verification</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="pipe rv" style="--d:.2s">
+        <div class="node">CLAUDE CITES<small>chunk #3, chars 120–248</small></div><div class="link"></div>
+        <div class="node">MAP BACK<small>chunk → page offsets</small></div><div class="link"></div>
+        <div class="node">VERIFY<small>slice == cited_text ?</small></div><div class="link"></div>
+        <div class="node hot">HIGHLIGHT<small>exact span in the PDF</small></div>
+      </div>
+      <div class="rows" style="margin-top:56px;">
+        <div class="row rv" style="--d:.45s"><span class="k">why it works</span><span class="v">Chunks kept their <span class="mono">char_start/char_end</span> since parsing — offsets compose all the way from <b>Claude's citation to the PDF page.</b></span></div>
+        <div class="row rv" style="--d:.6s"><span class="k">verified, not trusted</span><span class="v">Each citation is <b>re-sliced and compared</b> against the retrieved chunk. Mismatch → flagged, measured, and gated in eval.</span></div>
+        <div class="row rv" style="--d:.75s"><span class="k">persisted</span><span class="v">Citations ride on the message itself in the checkpoint — <b>reload a thread, keep every citation.</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 19 — THE THREE TOOLS ================= -->
+  <section class="slide" data-section="05 · frameworks">
+    <div class="s-head">
+      <div class="kicker rv">05 · Frameworks</div>
+      <h2 class="headline rv" style="--d:.1s">Supporting <span class="hl">frameworks</span></h2>
+    </div>
+    <div class="s-body">
+      <table class="data" style="font-size:26px;">
+        <tr class="rv" style="--d:.2s"><th style="width:340px;">Layer</th><th>What it does</th><th style="width:560px;">In PyNote</th></tr>
+        <tr class="rv" style="--d:.35s"><td>LangChain<br>+ LangGraph</td><td><b style="color:#DCE7EE">Orchestration.</b> Model wrappers, message types; LangGraph turns the pipeline into a stateful, checkpointed graph.</td><td><span class="m">chat_graph.py — 4 nodes,<br>PostgresSaver threads</span></td></tr>
+        <tr class="rv" style="--d:.5s"><td>LangSmith</td><td><b style="color:#DCE7EE">Observability.</b> Auto-traces every node run: prompts, latencies, token counts, in a web dashboard.</td><td><span class="m">tracing.py — env vars,<br>zero code changes</span></td></tr>
+        <tr class="rv" style="--d:.65s"><td>Ragas</td><td><b style="color:#DCE7EE">Evaluation.</b> LLM-as-judge scores: faithfulness, answer relevancy, context precision.</td><td><span class="m">eval/ragas_metrics.py —<br>optional heavyweight dep</span></td></tr>
+      </table>
+      <p class="lede rv" style="margin-top:48px; --d:.85s">In summary: LangGraph <b>executes</b> the pipeline, LangSmith <b>observes</b> it, Ragas <b>evaluates</b> it.</p>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 20 — EVALUATION ================= -->
+  <section class="slide" data-section="06 · analysis">
+    <div class="s-head">
+      <div class="kicker rv">06 · Analysis</div>
+      <h2 class="headline rv" style="--d:.1s">Evaluation <span class="hl">methodology</span></h2>
+    </div>
+    <div class="s-body">
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;">
+        <div class="card accent rv" style="--d:.2s"><h3>Citation grounding</h3><p><b>The headline gate.</b> Fraction of citations whose char-offset roundtrip resolves exactly. Ship requires <span class="mono" style="color:#5EEAC3">≥ 0.90</span>.</p></div>
+        <div class="card rv" style="--d:.35s"><h3>Lite metrics</h3><p>Word-overlap proxies for faithfulness &amp; relevancy — <b>no LLM calls</b>, instant feedback while tuning <span class="mono">top_k</span>.</p></div>
+        <div class="card rv" style="--d:.5s"><h3>Real Ragas</h3><p>LLM-judge scoring for depth, imported lazily — <b>opt-in</b>, so the base eval stays light and cheap.</p></div>
+      </div>
+      <div class="card warn rv" style="margin-top:44px; --d:.7s">
+        <h3>Known limitation</h3>
+        <p>The golden set is <b>10 questions</b>. Fine for a smoke test; far too small to catch regressions reliably.
+           Growing it to 50–100 labeled questions is <b>the single cheapest quality investment</b> in the roadmap.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 20b — THE FULL MAP OF RAG ================= -->
+  <section class="slide" data-section="06 · analysis">
+    <div class="s-head">
+      <div class="kicker rv">06 · Analysis — reference model</div>
+      <h2 class="headline rv" style="--d:.1s">Reference: <span class="hl">the full RAG map</span></h2>
+      <div class="legend rv" style="--d:.2s">
+        <i class="st-ok"></i>strong <i class="st-part"></i>partial <i class="st-miss"></i>missing</div>
+    </div>
+    <div class="s-body map-grid">
+      <div class="mcard rv" style="--d:.2s; border-color:#7BC96F;"><span class="st st-part"></span>
+        <h4 style="color:#7BC96F;">Data sources</h4>
+        <p>documents · code · spreadsheets · images<br>PyNote: PDFs only</p></div>
+      <div class="mcard rv" style="--d:.28s; border-color:#7BC96F;"><span class="st st-part"></span>
+        <h4 style="color:#7BC96F;">Ingestion / processing</h4>
+        <p>re-structuring · structure-aware chunking · metadata<br>headings ✓ · tables ✗</p></div>
+      <div class="mcard rv" style="--d:.36s; border-color:#6FA8FF;"><span class="st st-ok"></span>
+        <h4 style="color:#6FA8FF;">Retrieval funnel</h4>
+        <p>SQL filter → hybrid search → re-rank<br>a funnel, not a lookup</p></div>
+      <div class="mcard rv" style="--d:.44s; border-color:#B48CFF;"><span class="st st-ok"></span>
+        <h4 style="color:#B48CFF;">Database layer</h4>
+        <p>vector store + relational DB<br>PyNote: both in one Postgres</p></div>
+      <div class="mcard rv" style="--d:.52s; border-color:#D06FFF;"><span class="st st-miss"></span>
+        <h4 style="color:#D06FFF;">Reasoning engine</h4>
+        <p>planner · tool execution · conditional router<br>PyNote: fixed linear pipeline</p></div>
+      <div class="mcard rv" style="--d:.6s; border-color:#4FD8CF;"><span class="st st-miss"></span>
+        <h4 style="color:#4FD8CF;">Multi-agent system</h4>
+        <p>cooperating agents under the router<br>deliberately out of scope</p></div>
+      <div class="mcard rv" style="--d:.68s; border-color:#E8C36A;"><span class="st st-miss"></span>
+        <h4 style="color:#E8C36A;">Human validation</h4>
+        <p>gatekeeper · auditor · strategist feedback<br>no 👍/👎 loop yet</p></div>
+      <div class="mcard rv" style="--d:.76s; border-color:#FFD84C;"><span class="st st-part"></span>
+        <h4 style="color:#FFD84C;">Evaluation</h4>
+        <p>LLM judges · precision &amp; recall · latency &amp; cost<br>gate ✓ · continuous ✗</p></div>
+      <div class="mcard rv" style="--d:.84s; border-color:#FF6B5E;"><span class="st st-miss"></span>
+        <h4 style="color:#FF6B5E;">Stress testing / red team</h4>
+        <p>prompt injection · evasion · bias<br>Garak · PyRIT — none wired</p></div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 21 — SCORECARD VS FULL MAP ================= -->
+  <section class="slide" data-section="06 · analysis">
+    <div class="s-head">
+      <div class="kicker rv">06 · Analysis</div>
+      <h2 class="headline rv" style="--d:.1s">Comparative <span class="hl">analysis</span></h2>
+    </div>
+    <div class="s-body grid" style="grid-template-columns:1fr 1fr; gap:48px; align-content:start;">
+      <div class="card accent rv" style="--d:.2s; padding:40px 44px;">
+        <h3 style="color:#5EEAC3;">Implemented</h3>
+        <p style="line-height:1.7;">▸ Retrieval funnel — hybrid, fused, reranked<br>
+           ▸ Database layer — vectors + keywords, one store<br>
+           ▸ Verified citations — beyond most reference designs<br>
+           ▸ Eval harness with a hard ship gate<br>
+           ▸ Structure-aware ingestion <span class="mono" style="color:#FFB04C">(shipped this week)</span></p>
+      </div>
+      <div class="card warn rv" style="--d:.4s; padding:40px 44px;">
+        <h3 style="color:#FFB04C;">Not implemented</h3>
+        <p style="line-height:1.7;">▸ Reasoning engine — no routing, planning, or retry<br>
+           ▸ Human feedback loop — no 👍/👎, nothing learns<br>
+           ▸ Red teaming — PDF prompt-injection untested<br>
+           ▸ Data sources — PDFs only; no OCR, tables, web<br>
+           ▸ Continuous eval — pre-ship only, not on live traffic</p>
+      </div>
+      <p class="lede rv" style="grid-column:1/-1; font-size:30px; --d:.6s">
+        Summary: <b>the core pipeline is complete and tested</b>; the surrounding control loops remain future work.</p>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 22 — JUST SHIPPED ================= -->
+  <section class="slide" data-section="06 · analysis">
+    <div class="s-head">
+      <div class="kicker rv">06 · Analysis — case study</div>
+      <h2 class="headline rv" style="--d:.1s">Case study: <span class="hl">structure-aware chunking</span></h2>
+    </div>
+    <div class="s-body grid" style="grid-template-columns:1fr 1fr; gap:48px; align-content:start;">
+      <div class="card rv" style="--d:.2s; padding:40px 44px;">
+        <h3 style="color:#7E93A3;">Before</h3>
+        <p style="line-height:1.7;">Blind 1200-char windows, whitespace-snapped.<br>
+          Cut mid-sentence, mid-topic, across section borders.<br>
+          Undersized tails silently dropped.</p>
+      </div>
+      <div class="card accent rv" style="--d:.35s; padding:40px 44px;">
+        <h3>After</h3>
+        <p style="line-height:1.7;">Paragraph packing → sentence splits → heading hard-cuts.<br>
+          Section paths in chunk metadata <b>and</b> embeddings.<br>
+          Tails merge; nothing lost; contract intact.</p>
+      </div>
+      <div class="rows rv" style="grid-column:1/-1; --d:.55s">
+        <div class="row"><span class="k">method</span><span class="v"><span class="mono">font sizes → headings → boundaries → chunks → section paths → "title &gt; 3 Methods &gt; 3.2 Training" in the vector</span></span></div>
+        <div class="row"><span class="k">validation</span><span class="v">13 new tests, randomized contract checks with random boundaries, and a schema migration — <b>existing sources are re-ingested to benefit.</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 23 — WHAT'S NEXT ================= -->
+  <section class="slide" data-section="06 · analysis">
+    <div class="s-head">
+      <div class="kicker rv">06 · Analysis</div>
+      <h2 class="headline rv" style="--d:.1s">Future <span class="amb">work</span></h2>
+    </div>
+    <div class="s-body">
+      <table class="data" style="font-size:25px;">
+        <tr class="rv" style="--d:.2s"><th style="width:160px;">Priority</th><th style="width:520px;">Task</th><th>Rationale</th></tr>
+        <tr class="rv" style="--d:.3s"><td>1</td><td style="color:#DCE7EE;font-weight:700;">Golden set → 50–100 questions</td><td>Can't measure anything else safely without it — <span class="m">cheapest, highest leverage</span></td></tr>
+        <tr class="rv" style="--d:.4s"><td>2</td><td style="color:#DCE7EE;font-weight:700;">Lightweight routing</td><td>Skip retrieval for chit-chat; retry weak retrievals — cuts cost, lifts quality</td></tr>
+        <tr class="rv" style="--d:.5s"><td>3</td><td style="color:#DCE7EE;font-weight:700;">👍/👎 feedback capture</td><td>Free continuous-eval data from real usage; feeds everything downstream</td></tr>
+        <tr class="rv" style="--d:.6s"><td>4</td><td style="color:#DCE7EE;font-weight:700;">Prompt-injection tests</td><td>Uploaded PDFs flow verbatim into prompts — <span class="m">real, untested surface</span></td></tr>
+        <tr class="rv" style="--d:.7s"><td>5</td><td style="color:#DCE7EE;font-weight:700;">More sources · Docling tables</td><td>OCR, markdown, web; real table extraction — the remaining ingestion frontier</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= SLIDE 24 — CLOSING ================= -->
+  <section class="slide" data-section="fin">
+    <div class="kicker rv" style="position:absolute;left:160px;top:230px;--d:.1s">Conclusions</div>
+    <div class="statement rv" style="position:absolute;left:154px;top:310px;width:1560px;font-size:88px;--d:.25s">
+      Retrieval bounds answer quality.<br>
+      <span style="color:#5EEAC3">Structure beats fixed windows.</span><br>
+      <span style="color:#FFB04C">Evaluation gates deployment.</span></div>
+    <div class="pipe rv" style="position:absolute;left:160px;top:760px;--d:.55s">
+      <div class="node dim">README.md<small>quickstart</small></div><div class="link"></div>
+      <div class="node dim">RAG_ROADMAP.md<small>design rationale</small></div><div class="link"></div>
+      <div class="node dim">eval/<small>run the gate yourself</small></div>
+    </div>
+    <p class="lede rv" style="position:absolute;left:160px;top:930px;--d:.75s">PyNote — Retrieval-Augmented Generation, course report · <b>Thank you. Questions are welcome.</b></p>
+  </section>
+
+</div><!-- /stage -->
+</div><!-- /viewport -->
+
+<script>
+/* ============================================================
+   === STAGE SCALING — uniform fit, never reflow             ===
+   ============================================================ */
+function fit() {
+  const s = document.getElementById('stage');
+  s.style.transform = 'scale(' + Math.min(innerWidth / 1920, innerHeight / 1080) + ')';
+}
+addEventListener('resize', fit); fit();
+
+/* ============================================================
+   === SLIDE ENGINE — .active toggling, hash deep-links      ===
+   ============================================================ */
+const slides = [...document.querySelectorAll('.slide')];
+const tagSection = document.getElementById('tag-section');
+const tagCount = document.getElementById('tag-count');
+const bar = document.querySelector('#progress i');
+let cur = Math.min(Math.max((parseInt(location.hash.slice(1), 10) || 1) - 1, 0), slides.length - 1);
+
+function show(i) {
+  cur = Math.min(Math.max(i, 0), slides.length - 1);
+  slides.forEach((s, j) => s.classList.toggle('active', j === cur));
+  tagSection.textContent = slides[cur].dataset.section || '';
+  tagCount.textContent = String(cur + 1).padStart(2, '0') + ' / ' + slides.length;
+  bar.style.width = ((cur + 1) / slides.length * 100) + '%';
+  history.replaceState(null, '', '#' + (cur + 1));
+}
+show(cur);
+
+/* keyboard: arrows, space, home/end */
+addEventListener('keydown', (e) => {
+  if (document.body.classList.contains('editing') &&
+      !['Escape'].includes(e.key) && !(e.ctrlKey && e.key === 's')) return;
+  if (['ArrowRight', ' ', 'PageDown'].includes(e.key)) { e.preventDefault(); show(cur + 1); }
+  else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); show(cur - 1); }
+  else if (e.key === 'Home') show(0);
+  else if (e.key === 'End') show(slides.length - 1);
+});
+
+/* touch: horizontal swipe */
+let tx = null;
+addEventListener('touchstart', (e) => { tx = e.touches[0].clientX; }, { passive: true });
+addEventListener('touchend', (e) => {
+  if (tx === null) return;
+  const dx = e.changedTouches[0].clientX - tx;
+  if (Math.abs(dx) > 48) show(cur + (dx < 0 ? 1 : -1));
+  tx = null;
+}, { passive: true });
+
+/* ============================================================
+   === INLINE EDIT MODE — E toggles, Ctrl+S downloads a copy ===
+   ============================================================ */
+const EDITABLE = 'h1,h2,h3,h4,p,td,th,.kicker,.node,.stat .l,.statement,.chrome-tag,.row .v,.row .k';
+function setEditing(on) {
+  document.body.classList.toggle('editing', on);
+  document.querySelectorAll(EDITABLE).forEach(el =>
+    on ? el.setAttribute('contenteditable', 'true') : el.removeAttribute('contenteditable'));
+}
+addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 'e' && !document.body.classList.contains('editing') &&
+      !e.ctrlKey && !e.metaKey) setEditing(true);
+  else if (e.key === 'Escape') setEditing(false);
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    setEditing(false);
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+    const blob = new Blob(['<!DOCTYPE html>\n' + clone.outerHTML], { type: 'text/html' });
+    const a = Object.assign(document.createElement('a'),
+      { href: URL.createObjectURL(blob), download: 'pynote-rag-teachin.html' });
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+});
+</script>
+</body>
+</html>
