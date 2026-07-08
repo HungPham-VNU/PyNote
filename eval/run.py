@@ -110,7 +110,10 @@ async def run(
                 "error": str(e)[:200],
             }
         rows.append(row)
-        _emit({k: v for k, v in row.items() if k != "contexts"})
+        # With Ragas enabled, rows are emitted after scoring so the JSONL
+        # actually contains the ragas block (emitting here would drop it).
+        if not with_ragas:
+            _emit({k: v for k, v in row.items() if k != "contexts"})
 
     if with_ragas:
         from eval.ragas_metrics import score_with_ragas
@@ -127,6 +130,8 @@ async def run(
                 }
         except Exception as e:
             _print_progress(f"Ragas scoring failed: {e}")
+        for row in rows:
+            _emit({k: v for k, v in row.items() if k != "contexts"})
 
     gate = aggregate(rows)
     return rows, gate

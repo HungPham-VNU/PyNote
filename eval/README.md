@@ -213,3 +213,15 @@ just eval-retrieval NOTEBOOK_UUID
 
 Definition of done for any retrieval-affecting change: recall@8 and MRR not
 worse, and the M7 ship gate (`eval/run.py`) still passes.
+
+### Ragas judge model — practical notes (2026-07-08)
+
+- Run Ragas with the **Anthropic judge**: `PROVIDER_TIER=prod uv run python -m eval.run … --with-ragas`
+  (routes `get_cheap_model()` to Claude Haiku). A 3-question run ≈ 30–45 judge
+  calls ≈ $0.15–0.30.
+- The Gemini free tier is **not viable as judge** on this project: the daily
+  cap is 20 requests/model — one Ragas run needs more. Worse, the langchain
+  Gemini client's *async* path retries 429s silently until the job times out,
+  which looks like a hang (all jobs `TimeoutError`, all scores NaN/None).
+- Write `reference` answers **from the document**, not from memory — a wrong
+  reference makes `context_recall` score 0 even when retrieval was fine.

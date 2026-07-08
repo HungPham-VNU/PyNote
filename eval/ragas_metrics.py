@@ -100,7 +100,8 @@ async def score_with_ragas(
 
     samples = [
         {
-            "user_input": str(r["question"]),
+            # eval/run.py rows carry the question under "q"; accept both.
+            "user_input": str(r.get("question") or r.get("q") or ""),
             "retrieved_contexts": list(r.get("contexts") or []),
             "response": str(r.get("answer") or ""),
             **({"reference": str(r["reference"])} if r.get("reference") else {}),
@@ -118,7 +119,14 @@ async def score_with_ragas(
         metrics.extend([context_precision, context_recall])
 
     dataset = EvaluationDataset.from_list(samples)
-    result = evaluate(dataset, metrics=metrics, llm=judge, embeddings=embeddings)
+    # Free-tier judges throttle hard (flash-lite: 15 RPM). Few workers + a
+    # generous per-job timeout beat the defaults, which burst then TimeoutError.
+    from ragas import RunConfig
+
+    run_config = RunConfig(timeout=300, max_workers=4)
+    result = evaluate(
+        dataset, metrics=metrics, llm=judge, embeddings=embeddings, run_config=run_config
+    )
     df = result.to_pandas()
 
     out: list[RagasScores] = []
