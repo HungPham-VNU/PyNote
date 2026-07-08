@@ -53,8 +53,9 @@ query rewriting). Fix order below reflects that.
 | 2.1 Per-message citations | ✅ done | Citations persisted on `AIMessage.additional_kwargs`; history endpoint reads per-message with `last_citations` fallback for old threads |
 | 2.2 Retrieval eval | ✅ done | `eval/retrieval_eval.py` + `just eval-retrieval`; template at `eval/golden/retrieval.template.jsonl` — **needs a real golden set labeled against an ingested notebook** |
 | 2.3 Parser hygiene | ✅ partial | Header/footer stripping + de-hyphenation done. Cross-page chunk flow deliberately skipped: it can't preserve the citation contract with page-based parts; resolved properly by section-based parts in 3.1 |
-| 3.2 Contextual embeddings | ✅ title-only | Title prepended to embedding input + `setweight`-ed into tsvector; raw `chunk.text` untouched. Section paths join when 3.1 lands. Applies to sources ingested after this change — re-ingest older sources to benefit |
-| 3.1 Docling, 3.3 embedding upgrade, Phase 4 | ⬜ pending | Gated on a labeled retrieval golden set (2.2) for before/after measurement |
+| 3.1 Structure-aware parsing | ✅ lightweight | Font-size heading detection in pdf.py (no Docling, zero new deps) → `ParsedPart.headings` → `source_part.meta` (migration 0004). Chunker packs paragraphs, splits long ones at sentence ends, treats heading offsets as hard boundaries; `section_paths` builds the hierarchy per chunk (`chunk.meta.section_path`). Docling still the upgrade path for tables + multi-column reading order |
+| 3.2 Contextual embeddings | ✅ title+sections | `"title > 3 Methods > 3.2 Training"` prepended to embedding input + `setweight`-ed into tsvector; raw `chunk.text` untouched. Applies to sources ingested after this change — re-ingest older sources to benefit |
+| 3.3 embedding upgrade, Phase 4 | ⬜ pending | Gated on a labeled retrieval golden set (2.2) for before/after measurement |
 
 **Rule for phases 3–4: land Phase 2's retrieval eval first.** Every structural
 change after that gets a before/after recall@k number, not vibes.

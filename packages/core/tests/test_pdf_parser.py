@@ -100,3 +100,55 @@ def test_list_dashes_not_joined(tmp_path: Path) -> None:
     pdf = _make_pdf(tmp_path, ["Items considered-\nAlpha and beta."])
     parts = list(parse_pdf(pdf))
     assert "considered-\nAlpha" in parts[0].text
+
+
+# ---- heading detection (RAG_ROADMAP 3.1) ------------------------------------
+
+
+_BODY = (
+    "This body paragraph describes the approach in enough detail that the "
+    "body font clearly dominates the character count on the page."
+)
+
+
+def _make_structured_pdf(tmp_path: Path) -> Path:
+    """Two pages: sized headings (18pt/14pt) over 11pt body text."""
+    path = tmp_path / "structured.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 80), "1 Introduction", fontsize=18)
+    page.insert_text((72, 110), _BODY, fontsize=11)
+    page.insert_text((72, 140), "1.1 Motivation", fontsize=14)
+    page.insert_text((72, 170), _BODY, fontsize=11)
+    page = doc.new_page()
+    page.insert_text((72, 80), _BODY, fontsize=11)  # section continues from page 1
+    page.insert_text((72, 110), "2 Methods", fontsize=18)
+    page.insert_text((72, 140), _BODY, fontsize=11)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_headings_detected_with_levels_and_offsets(tmp_path: Path) -> None:
+    parts = list(parse_pdf(_make_structured_pdf(tmp_path)))
+
+    assert parts[0].headings is not None
+    by_text = {h["text"]: h for h in parts[0].headings}
+    assert by_text["1 Introduction"]["level"] == 1
+    assert by_text["1.1 Motivation"]["level"] == 2
+
+    # Offsets bind the cleaned text — the chunker's boundary contract.
+    for h in parts[0].headings:
+        start = h["start"]
+        assert parts[0].text[start : start + len(h["text"])] == h["text"]
+
+    assert parts[1].headings is not None
+    [methods] = parts[1].headings
+    assert methods["text"] == "2 Methods"
+    assert methods["level"] == 1
+
+
+def test_uniform_font_pdf_has_no_headings(tmp_path: Path) -> None:
+    pdf = _make_pdf(tmp_path, ["All body text.", "Nothing but body text here."])
+    for part in parse_pdf(pdf):
+        assert part.headings is None

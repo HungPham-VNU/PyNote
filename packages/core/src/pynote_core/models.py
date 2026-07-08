@@ -153,6 +153,9 @@ class SourcePart(SQLModel, table=True):
     page: int | None = Field(default=None)  # 1-based page number for PDFs
     text: str = Field()  # extracted text; "" allowed for image-only pages
     bbox: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # Structure metadata from the parser (RAG_ROADMAP 3.1): {"headings": [...]}
+    # with char offsets into `text`. None for loaders without structure info.
+    meta: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
 
     created_at: datetime = _ts_field()
 
@@ -166,9 +169,10 @@ class SourcePart(SQLModel, table=True):
 # ---- Chunk (M2) ------------------------------------------------------------
 #
 # Retrieval unit. One PDF page (= SourcePart) yields multiple Chunks via the
-# char-based hierarchical chunker. Schema supports both fine (level 0) and
-# section (level 1) chunks — M2 writes only level 0 (M2's chunker is flat;
-# section detection lands when we adopt Docling).
+# structure-aware chunker (paragraph/sentence boundaries, heading offsets as
+# hard cuts; section hierarchy in meta.section_path). Schema supports both
+# fine (level 0) and section (level 1) chunks — only level 0 is written today;
+# level-1 parent chunks land with parent-child retrieval (RAG_ROADMAP 4.3).
 #
 # `(notebook_id, source_id, source_part_id)` is denormalized so the search
 # query can filter on notebook_id without joins.

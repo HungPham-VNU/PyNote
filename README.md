@@ -13,7 +13,7 @@ A NotebookLM-style RAG application: upload PDFs, ask grounded questions, click a
 | What it does | How |
 |---|---|
 | Multi-tenant cloud-deployable web app | Clerk org-scoped auth + Postgres RLS-ready schema |
-| PDF upload → parse → chunk → embed → outline | PyMuPDF + char-based hierarchical chunker + fastembed BGE-small (384-dim) |
+| PDF upload → parse → chunk → embed → outline | PyMuPDF (font-based heading detection) + structure-aware chunker (paragraph/sentence/section boundaries) + fastembed BGE-small (384-dim) |
 | Hybrid retrieval | pgvector dense + tsvector sparse, RRF fused in a single SQL CTE |
 | Optional rerank | Voyage rerank-2.5 (200M tok/mo free) |
 | Streaming chat with citations | LangGraph `retrieve → generate → map_citations` with AsyncPostgresSaver, SSE token stream |

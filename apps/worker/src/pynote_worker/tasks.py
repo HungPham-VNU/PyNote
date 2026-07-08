@@ -21,7 +21,7 @@ from sqlalchemy import text as sql_text
 if TYPE_CHECKING:
     from arq.connections import ArqRedis
 
-from pynote_core.chunker import chunk_text
+from pynote_core.chunker import chunk_text, section_paths
 from pynote_core.db import async_session_scope
 from pynote_core.embeddings import get_embedder
 from pynote_core.llm import get_chat_model
@@ -124,6 +124,7 @@ async def parse_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
                     page=p.page,
                     text=p.text,
                     bbox=p.bbox,
+                    meta={"headings": p.headings} if p.headings else None,
                 )
             )
         source.status = "parsed"
@@ -146,6 +147,16 @@ async def parse_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
         log.info("parse_source[%s]: enqueued embed_source", sid)
 
     return {"ok": True, "source_id": source_id, "parts": len(parts)}
+
+
+def _context_header(source_title: str | None, section_path: list[str]) -> str:
+    """Embedding/tsvector context: "title > 3 Methods > 3.2 Training".
+
+    Fed to the embedder and the weighted tsvector, never stored in
+    `chunk.text` — the citation contract binds the raw text only.
+    """
+    parts = [p for p in [(source_title or "").strip(), *section_path] if p]
+    return " > ".join(parts)
 
 
 async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
@@ -189,12 +200,19 @@ async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
         return {"ok": True, "chunks": 0}
 
     # ---- 1. Chunk every part (CPU work — to_thread keeps loop free) ----
+    # Structure-aware (RAG_ROADMAP 3.1): headings detected at parse time become
+    # hard chunk boundaries, and each chunk gets its section path. The heading
+    # stack carries across parts — a section stays open across page breaks.
     chunk_phase = time.perf_counter()
-    all_chunks: list[tuple[SourcePart, int, Any]] = []  # (part, ordinal_in_source, Chunk)
+    all_chunks: list[tuple[SourcePart, int, Any, list[str]]] = []  # (part, ordinal, Chunk, path)
     ordinal = 0
+    heading_stack: list[tuple[int, str]] = []
     for part in parts:
-        for c in chunk_text(part.text):
-            all_chunks.append((part, ordinal, c))
+        headings = (part.meta or {}).get("headings") or []
+        chunks = chunk_text(part.text, boundaries=[h["start"] for h in headings])
+        paths = section_paths([c.char_start for c in chunks], headings, heading_stack)
+        for c, path in zip(chunks, paths, strict=True):
+            all_chunks.append((part, ordinal, c, path))
             ordinal += 1
     log.info(
         "embed_source[%s]: produced %d chunks from %d parts in %dms",
@@ -213,15 +231,17 @@ async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
         return {"ok": True, "chunks": 0}
 
     # ---- 2. Embed in one batched call ----
-    # Contextual embeddings, title-only variant (RAG_ROADMAP 3.2): the source
-    # title is prepended to the text fed to the embedder so orphan chunks carry
-    # document identity. `chunk.text` is persisted RAW — the citation contract
-    # binds the stored text, not the embedding input. Section paths join the
-    # header when Docling lands (3.1).
+    # Contextual embeddings (RAG_ROADMAP 3.2): "title > section > subsection"
+    # is prepended to the text fed to the embedder so orphan chunks carry
+    # document identity and position. `chunk.text` is persisted RAW — the
+    # citation contract binds the stored text, not the embedding input.
     embed_phase = time.perf_counter()
     embedder = get_embedder()
-    header = (source_title or "").strip()
-    texts = [f"{header}\n\n{c.text}" if header else c.text for (_, _, c) in all_chunks]
+    headers = [_context_header(source_title, path) for (_, _, _, path) in all_chunks]
+    texts = [
+        f"{hdr}\n\n{c.text}" if hdr else c.text
+        for hdr, (_, _, c, _) in zip(headers, all_chunks, strict=True)
+    ]
     vectors = await embedder.embed_many(texts)
     log.info(
         "embed_source[%s]: embedded %d chunks in %dms (%d-dim)",
@@ -248,34 +268,40 @@ async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
                 await db.delete(o)
             await db.flush()
 
-        for (part, ord_in_src, c), vec in zip(all_chunks, vectors, strict=True):
-            db.add(
-                Chunk(
-                    notebook_id=notebook_id,
-                    source_id=sid,
-                    source_part_id=part.id,
-                    level=0,
-                    ordinal=ord_in_src,
-                    text=c.text,
-                    char_start=c.char_start,
-                    char_end=c.char_end,
-                    embedding=vec,
-                    meta={"page": part.page, "source_title": src.title},
-                ),
+        tsv_rows: list[dict[str, str]] = []
+        for (part, ord_in_src, c, path), vec, hdr in zip(all_chunks, vectors, headers, strict=True):
+            chunk_row = Chunk(
+                notebook_id=notebook_id,
+                source_id=sid,
+                source_part_id=part.id,
+                level=0,
+                ordinal=ord_in_src,
+                text=c.text,
+                char_start=c.char_start,
+                char_end=c.char_end,
+                embedding=vec,
+                meta={
+                    "page": part.page,
+                    "source_title": src.title,
+                    **({"section_path": path} if path else {}),
+                },
             )
+            db.add(chunk_row)
+            tsv_rows.append({"id": str(chunk_row.id), "ctx": hdr})
         await db.flush()
 
-        # Populate tsvector once per source (one round-trip, indexed by GIN).
-        # Title terms are weighted below body text ('B' vs 'A') so a
-        # title-keyword query prefers chunks whose *body* matches too.
+        # Populate tsvector in one executemany round-trip (indexed by GIN).
+        # Context terms — title + section path — are weighted below body text
+        # ('B' vs 'A') so a title/heading-keyword query prefers chunks whose
+        # *body* matches too.
         await db.execute(
             sql_text(
                 "UPDATE chunk SET tsv = "
                 "  setweight(to_tsvector('english', text), 'A') || "
-                "  setweight(to_tsvector('english', :title), 'B') "
-                "WHERE source_id = :sid AND tsv IS NULL",
+                "  setweight(to_tsvector('english', :ctx), 'B') "
+                "WHERE id = :id",
             ),
-            {"sid": str(sid), "title": source_title or ""},
+            tsv_rows,
         )
 
         src.status = "ready"

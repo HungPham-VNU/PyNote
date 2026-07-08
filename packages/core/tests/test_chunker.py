@@ -11,7 +11,7 @@ import string
 
 import pytest
 
-from pynote_core.chunker import chunk_text
+from pynote_core.chunker import chunk_text, section_paths
 
 
 def test_empty_text_yields_nothing() -> None:
@@ -73,6 +73,128 @@ def test_no_runaway_on_token_less_input() -> None:
         for i in range(c.char_start, c.char_end):
             covered[i] = 1
     assert sum(covered) == len(text)
+
+
+# ---- structure awareness (RAG_ROADMAP 3.1) ----------------------------------
+
+
+def test_paragraphs_are_not_split_when_they_fit() -> None:
+    """Chunks align to paragraph boundaries: no chunk starts or ends mid-paragraph."""
+    paras = [
+        f"Paragraph {i} talks about topic {i} in a couple of sentences. More text {i}."
+        for i in range(8)
+    ]
+    src = "\n\n".join(paras)
+    chunks = chunk_text(src, target_chars=200, min_chars=10)
+
+    para_starts = {src.index(p) for p in paras}
+    para_ends = {src.index(p) + len(p) for p in paras}
+    assert len(chunks) > 1
+    for c in chunks:
+        assert c.char_start in para_starts
+        assert c.char_end in para_ends
+    for c in chunks:
+        assert src[c.char_start : c.char_end] == c.text
+
+
+def test_oversized_paragraph_splits_at_sentence_ends() -> None:
+    """Every non-final chunk of a long paragraph ends on a sentence boundary."""
+    src = ("The model retrieves relevant chunks from storage. " * 40).rstrip()
+    chunks = chunk_text(src, target_chars=300)
+
+    assert len(chunks) > 2
+    for c in chunks[:-1]:
+        assert c.text.rstrip().endswith("."), f"chunk ends mid-sentence: {c.text[-40:]!r}"
+    for c in chunks:
+        assert src[c.char_start : c.char_end] == c.text
+
+
+def test_forced_boundaries_are_never_spanned() -> None:
+    """A chunk never crosses a section boundary (heading offset)."""
+    section = "Heading line\n" + "Body sentence with several words repeated here. " * 10
+    src = "\n\n".join([section] * 4)
+    boundaries = [i for i in range(len(src)) if src.startswith("Heading line", i)][1:]
+
+    chunks = chunk_text(src, target_chars=5000, boundaries=boundaries)
+
+    assert len(chunks) >= len(boundaries) + 1  # at least one chunk per section
+    for c in chunks:
+        for b in boundaries:
+            assert not (c.char_start < b < c.char_end), f"chunk spans boundary at {b}"
+        assert src[c.char_start : c.char_end] == c.text
+
+
+def test_trailing_sliver_merges_into_previous_chunk() -> None:
+    """Undersized tails extend the previous chunk instead of being dropped."""
+    src = (
+        "A full sentence about retrieval systems and their chunking. " * 20
+    ).rstrip() + "\n\nTiny tail."
+    chunks = chunk_text(src, target_chars=400, min_chars=100)
+
+    assert chunks[-1].char_end == len(src), "tail text must not be lost"
+    for c in chunks:
+        assert src[c.char_start : c.char_end] == c.text
+
+
+def test_citation_contract_holds_with_random_boundaries() -> None:
+    """Roundtrip must survive arbitrary forced boundaries."""
+    rng = random.Random(20260708)
+    alphabet = string.ascii_letters + string.digits + "   \n\n.,;:!?-—()[]\"'"
+
+    for _ in range(300):
+        length = rng.randint(0, 4000)
+        text = "".join(rng.choice(alphabet) for _ in range(length))
+        n_bounds = rng.randint(0, 8)
+        boundaries = sorted(rng.randint(0, max(length, 1)) for _ in range(n_bounds))
+
+        chunks = chunk_text(text, target_chars=rng.choice((300, 800)), boundaries=boundaries)
+
+        for c in chunks:
+            assert text[c.char_start : c.char_end] == c.text
+
+
+# ---- section paths -----------------------------------------------------------
+
+
+def test_section_paths_basic_hierarchy() -> None:
+    headings = [
+        {"text": "3 Methods", "level": 1, "start": 10},
+        {"text": "3.2 Training", "level": 2, "start": 200},
+    ]
+    stack: list[tuple[int, str]] = []
+    paths = section_paths([0, 50, 250], headings, stack)
+
+    assert paths == [[], ["3 Methods"], ["3 Methods", "3.2 Training"]]
+
+
+def test_section_paths_same_level_replaces() -> None:
+    headings = [
+        {"text": "3 Methods", "level": 1, "start": 0},
+        {"text": "3.2 Training", "level": 2, "start": 100},
+        {"text": "4 Results", "level": 1, "start": 300},
+    ]
+    stack: list[tuple[int, str]] = []
+    paths = section_paths([150, 350], headings, stack)
+
+    assert paths == [["3 Methods", "3.2 Training"], ["4 Results"]]
+
+
+def test_section_paths_state_carries_across_parts() -> None:
+    """A section opened on page 1 stays open for page 2's chunks."""
+    stack: list[tuple[int, str]] = []
+    section_paths([0], [{"text": "Intro", "level": 1, "start": 0}], stack)
+    # Page 2: no headings of its own.
+    paths = section_paths([0, 500], [], stack)
+
+    assert paths == [["Intro"], ["Intro"]]
+
+
+def test_section_paths_applies_headings_after_last_chunk() -> None:
+    """A heading past the last chunk still mutates state for the next part."""
+    stack: list[tuple[int, str]] = []
+    section_paths([0], [{"text": "Appendix", "level": 1, "start": 900}], stack)
+
+    assert [t for _, t in stack] == ["Appendix"]
 
 
 @pytest.mark.parametrize(
