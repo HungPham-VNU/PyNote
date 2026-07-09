@@ -10,6 +10,7 @@ Run:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import sys
@@ -32,10 +33,23 @@ def _start_health_server() -> None:
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"ok")
+            # A prober may close the connection early while the single free-tier
+            # vCPU is busy embedding; ignore the resulting broken-pipe/reset so
+            # the handler thread never raises (which socketserver would print as
+            # "Exception occurred during processing of request").
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"ok")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+
+        def handle_one_request(self) -> None:
+            with contextlib.suppress(
+                BrokenPipeError, ConnectionResetError, ConnectionAbortedError
+            ):
+                super().handle_one_request()
 
         def log_message(self, *_args: object) -> None:
             pass  # silence per-request stderr spam; arq owns the logs

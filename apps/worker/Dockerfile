@@ -5,7 +5,11 @@ ENV PYTHONUNBUFFERED=1 \
     # Cap native thread pools (onnxruntime/OpenBLAS/OMP) so they don't size to
     # the host CPU count and allocate a per-thread arena — the 512MB worker OOM.
     OMP_NUM_THREADS=1 \
-    OPENBLAS_NUM_THREADS=1
+    OPENBLAS_NUM_THREADS=1 \
+    # Pin the HuggingFace cache to a fixed in-image path so the model baked at
+    # build time is found at runtime (default cache differs → re-download on
+    # every cold boot, DEPLOY.md §2.4 landmine #6).
+    HF_HOME=/app/hf
 
 RUN pip install --no-cache-dir uv
 

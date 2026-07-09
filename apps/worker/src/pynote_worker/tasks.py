@@ -173,9 +173,14 @@ async def embed_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:
         if source is None:
             log.warning("embed_source[%s]: source row missing", sid)
             return {"ok": False, "reason": "source-not-found"}
-        if source.status != "parsed":
+        # Accept `embedding` as well as `parsed`: if a prior run was killed
+        # mid-embed (e.g. the worker was restarted), the source is left at
+        # `embedding`, and an arq retry must be able to re-enter and finish.
+        # embed is idempotent — it clears existing chunks before inserting — so
+        # re-running from `embedding` is safe.
+        if source.status not in ("parsed", "embedding"):
             log.warning(
-                "embed_source[%s]: skipping — status=%s (expected 'parsed')",
+                "embed_source[%s]: skipping — status=%s (expected 'parsed'/'embedding')",
                 sid,
                 source.status,
             )

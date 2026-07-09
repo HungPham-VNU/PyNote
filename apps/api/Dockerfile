@@ -5,7 +5,10 @@ ENV PYTHONUNBUFFERED=1 \
     # Cap native thread pools (onnxruntime/OpenBLAS/OMP) so the query embedder
     # doesn't over-allocate on the 512MB instance — see worker Dockerfile.
     OMP_NUM_THREADS=1 \
-    OPENBLAS_NUM_THREADS=1
+    OPENBLAS_NUM_THREADS=1 \
+    # Pin the HuggingFace cache so the baked model is found at runtime — see
+    # worker Dockerfile.
+    HF_HOME=/app/hf
 
 # uv for fast installs.
 RUN pip install --no-cache-dir uv

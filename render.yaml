@@ -69,7 +69,12 @@ services:
     dockerContext: .
     region: virginia
     plan: free
-    healthCheckPath: /healthz     # the tiny $PORT health server in __main__.py
+    # NO healthCheckPath: the worker does long CPU-bound embeds that saturate
+    # the free-tier vCPU. An active health check times out during embedding and
+    # Render restarts the worker mid-job, killing it before it can persist
+    # chunks and mark the source `ready` (source stuck at "embedding"). The
+    # worker still binds $PORT via its health server, which satisfies Render's
+    # one-time port scan — that's all Render needs to keep a web service alive.
     envVars:
       - fromGroup: pynote-shared
       - key: WORKER_CONCURRENCY
