@@ -6,7 +6,12 @@ import { useRouter } from "next/navigation";
 import { deleteSource, listSources, type Source } from "@/lib/api";
 import { StatusPill } from "@/components/status-pill";
 
-const TERMINAL = new Set(["parsed", "ready", "failed"]);
+// Only `ready` and `failed` are terminal. `parsed` (parse done, embed pending)
+// and `embedding` are intermediate — the source lifecycle is
+// parsing → parsed → embedding → ready. Including `parsed` here previously
+// stopped polling early, leaving the UI stuck on "parsed" until a manual
+// reload while embed_source finished in the background.
+const TERMINAL = new Set(["ready", "failed"]);
 const POLL_MS = 2500;
 
 export function SourceList({
