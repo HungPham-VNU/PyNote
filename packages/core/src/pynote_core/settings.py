@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dim: int = 384
     voyage_api_key: str | None = None
+    # Memory guards for small containers (Render free = 512MB). onnxruntime
+    # otherwise sizes its intra-op thread pool to the *host* CPU count and
+    # allocates a memory arena per thread — the main OOM cause on the worker.
+    # 1 thread keeps the model footprint flat; a small batch caps peak inference
+    # activation memory regardless of document size. Bump both on a bigger box.
+    embed_threads: int = 1
+    embed_batch_size: int = 16
 
     # ---- Rerank ----
     rerank_provider: Literal["voyage", "bge-local"] = "voyage"

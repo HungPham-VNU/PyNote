@@ -39,13 +39,19 @@ class _FastembedBGE(Embedder):
     """Local ONNX inference via fastembed.
 
     fastembed batches efficiently and runs CPU-only by default; no torch.
+
+    `threads` caps onnxruntime's intra-op thread pool: unset, onnxruntime sizes
+    it to the host CPU count and allocates a memory arena per thread, which is
+    the primary OOM cause on a 512MB container. `batch_size` bounds peak
+    inference activation memory so a large document can't spike the process.
     """
 
-    def __init__(self, model_name: str, dim: int) -> None:
+    def __init__(self, model_name: str, dim: int, *, threads: int, batch_size: int) -> None:
         from fastembed import TextEmbedding
 
-        self._model = TextEmbedding(model_name=model_name)
+        self._model = TextEmbedding(model_name=model_name, threads=threads)
         self.dim = dim
+        self._batch_size = batch_size
 
     async def embed_many(self, texts: Iterable[str]) -> list[list[float]]:
         import asyncio
@@ -54,7 +60,11 @@ class _FastembedBGE(Embedder):
         if not items:
             return []
         # fastembed.embed is sync; run in a thread so the event loop stays free.
-        vectors = await asyncio.to_thread(lambda: list(self._model.embed(items)))
+        # parallel=None keeps inference single-process (parallel=0 would fork a
+        # worker per core, each loading the full model — instant OOM on 512MB).
+        vectors = await asyncio.to_thread(
+            lambda: list(self._model.embed(items, batch_size=self._batch_size, parallel=None)),
+        )
         return [list(map(float, v)) for v in vectors]
 
     async def embed_query(self, text: str) -> list[float]:
@@ -70,7 +80,12 @@ class _FastembedBGE(Embedder):
 def get_embedder() -> Embedder:
     settings = get_settings()
     if settings.embedding_provider in ("bge-small-local", "bge-m3-local"):
-        return _FastembedBGE(settings.embedding_model, settings.embedding_dim)
+        return _FastembedBGE(
+            settings.embedding_model,
+            settings.embedding_dim,
+            threads=settings.embed_threads,
+            batch_size=settings.embed_batch_size,
+        )
     raise NotImplementedError(
         f"embedding_provider={settings.embedding_provider!r} not wired yet — "
         "stay on bge-small-local for M2 or add a branch in embeddings.py.",

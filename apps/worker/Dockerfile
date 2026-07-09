@@ -1,7 +1,11 @@
 FROM python:3.12-slim AS base
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    # Cap native thread pools (onnxruntime/OpenBLAS/OMP) so they don't size to
+    # the host CPU count and allocate a per-thread arena — the 512MB worker OOM.
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1
 
 RUN pip install --no-cache-dir uv
 

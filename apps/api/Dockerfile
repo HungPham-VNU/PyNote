@@ -1,7 +1,11 @@
 FROM python:3.12-slim AS base
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    # Cap native thread pools (onnxruntime/OpenBLAS/OMP) so the query embedder
+    # doesn't over-allocate on the 512MB instance — see worker Dockerfile.
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1
 
 # uv for fast installs.
 RUN pip install --no-cache-dir uv
