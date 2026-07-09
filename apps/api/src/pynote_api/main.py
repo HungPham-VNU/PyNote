@@ -87,10 +87,11 @@ def create_app() -> FastAPI:
         docs_url="/docs" if settings.environment != "production" else None,
     )
 
-    # CORS — the Next.js web app is on a different origin in dev.
+    # CORS — the Next.js web app is on a different origin (localhost in dev,
+    # the Vercel domain in cloud). Driven by CORS_ORIGINS (see settings).
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

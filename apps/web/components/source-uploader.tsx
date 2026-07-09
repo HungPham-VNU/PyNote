@@ -7,6 +7,24 @@ import { uploadSource } from "@/lib/api";
 
 const MAX_MB = 30;
 
+// Accepted upload types — must mirror CONTENT_TYPE_TO_KIND on the API. Some
+// browsers send Office files as an empty/generic type, so we also allow by
+// file extension as a fallback.
+const ACCEPTED_MIME = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+]);
+const ACCEPTED_EXT = [".pdf", ".pptx", ".xlsx", ".csv"];
+const ACCEPT_ATTR = [...ACCEPTED_MIME, ...ACCEPTED_EXT].join(",");
+
+function isAccepted(file: File): boolean {
+  if (ACCEPTED_MIME.has(file.type)) return true;
+  const name = file.name.toLowerCase();
+  return ACCEPTED_EXT.some((ext) => name.endsWith(ext));
+}
+
 export function SourceUploader({ notebookId }: { notebookId: string }) {
   const { getToken } = useAuth();
   const router = useRouter();
@@ -16,8 +34,8 @@ export function SourceUploader({ notebookId }: { notebookId: string }) {
 
   const submit = (file: File) => {
     setError(null);
-    if (file.type !== "application/pdf") {
-      setError("Only PDF accepted in M1.");
+    if (!isAccepted(file)) {
+      setError("Accepted types: PDF, PowerPoint (.pptx), Excel (.xlsx), CSV.");
       return;
     }
     if (file.size > MAX_MB * 1024 * 1024) {
@@ -57,14 +75,14 @@ export function SourceUploader({ notebookId }: { notebookId: string }) {
       >
         <span className="text-2xl text-[#8c909f]">↑</span>
         <span className="mt-1 font-medium text-[#e5e2e3]">
-          {pending ? "Uploading…" : "Drag & Drop a PDF"}
+          {pending ? "Uploading…" : "Drag & Drop a file"}
         </span>
         <span className="mt-0.5 text-[#c2c6d6]">
-          or click to browse · max {MAX_MB}MB
+          PDF · PPTX · XLSX · CSV — click to browse · max {MAX_MB}MB
         </span>
         <input
           type="file"
-          accept="application/pdf"
+          accept={ACCEPT_ATTR}
           className="hidden"
           disabled={pending}
           onChange={(e) => {

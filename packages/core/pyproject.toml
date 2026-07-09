@@ -22,8 +22,11 @@ dependencies = [
   "langsmith>=0.2",
   # storage
   "boto3>=1.35",
-  # parsing (M1: PDF only via PyMuPDF; swap to Docling in M2 for section detection)
+  # parsing (M1: PDF via PyMuPDF; swap to Docling in M2 for section detection)
   "pymupdf>=1.25",
+  # parsing: Office formats — PowerPoint (.pptx) and Excel (.xlsx). CSV uses stdlib.
+  "python-pptx>=1.0",
+  "openpyxl>=3.1",
   # embeddings (M2: fastembed default; bge-m3 / voyage are swap-in options)
   "fastembed>=0.4",
   # rerank (M3: Voyage rerank-2.5 — first 200M tok/mo free; optional in prototype)

@@ -1,25 +1,4 @@
 """PDF loader (PyMuPDF).
-
-One ParsedPart per page. Text is extracted in natural reading order
-(`get_text("text")`) — fast and predictable. We capture the page rect as bbox
-so later milestones can lay out highlights.
-
-Hygiene passes (RAG_ROADMAP 2.3) applied before parts are yielded:
-  - repeated header/footer lines (page numbers, running titles) are stripped —
-    they'd otherwise pollute every chunk's embedding and tsvector;
-  - hyphenated line wraps are joined ("improve-\\nment" → "improvement") so
-    split words don't hide from retrieval.
-Both run at parse time, so `source_part.text` is stored clean and the
-citation contract binds the cleaned text.
-
-Structure detection (RAG_ROADMAP 3.1, lightweight variant): headings are
-detected from font metadata — a short line set noticeably larger than the
-document's body size (or bold at body size) is a heading, and distinct
-heading sizes rank into levels. Detected headings are located in the cleaned
-page text and emitted as `ParsedPart.headings` so the chunker can treat them
-as hard section boundaries and build section paths. Docling remains the
-heavyweight upgrade path (tables, multi-column reading order); this covers
-the heading/boundary share of it with zero new dependencies.
 """
 
 import re

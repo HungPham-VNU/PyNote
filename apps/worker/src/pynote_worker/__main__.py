@@ -13,6 +13,45 @@ import asyncio
 import logging
 import os
 import sys
+import threading
+
+
+def _start_health_server() -> None:
+    """Bind a throwaway HTTP health port in a daemon thread.
+
+    Render's free tier only offers *web* services (background workers are paid),
+    and a web service that doesn't bind `$PORT` gets killed at boot. arq itself
+    listens on nothing, so we serve a trivial 200-on-any-path here purely to
+    satisfy the platform health check (DEPLOY.md §2.3). No-op locally beyond
+    holding a socket. If `$PORT` is unset (local `just worker`), we still bind
+    a default so behavior is identical everywhere.
+    """
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    port = int(os.environ.get("PORT", "8080"))
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib naming
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *_args: object) -> None:
+            pass  # silence per-request stderr spam; arq owns the logs
+
+    def _serve() -> None:
+        try:
+            ThreadingHTTPServer(("0.0.0.0", port), _Handler).serve_forever()
+        except OSError:
+            # Port already taken (e.g. two starts in one process) — the worker
+            # is what matters, so log and carry on rather than crash.
+            logging.getLogger("pynote_worker").warning(
+                "health port %d unavailable; continuing without it", port
+            )
+
+    threading.Thread(target=_serve, name="health", daemon=True).start()
+    logging.getLogger("pynote_worker").info("health server listening on :%d", port)
 
 
 def _configure_logging() -> None:

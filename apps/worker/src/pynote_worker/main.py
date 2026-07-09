@@ -49,3 +49,9 @@ class WorkerSettings:
     max_jobs: ClassVar[int] = _settings.worker_concurrency
     job_timeout: ClassVar[int] = 60 * 30  # generous for big-PDF parsing in later milestones
     keep_result: ClassVar[int] = 60 * 60 * 24
+    # arq's default poll_delay=0.5s is ~2 Redis cmds/sec ≈ 5M/month — it would
+    # exhaust Upstash's 500k free monthly quota in ~3 days (DEPLOY.md §2.2/§4).
+    # 5s adds at most 5s of ingest latency (invisible next to cold starts) and
+    # keeps steady-state polling well under quota.
+    poll_delay: ClassVar[float] = 5.0
+    health_check_interval: ClassVar[int] = 300

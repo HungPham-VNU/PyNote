@@ -8,6 +8,7 @@ simpler and 30MB PDFs upload fine through it. Presign lands later (see PLAN.md).
 """
 
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -25,6 +26,42 @@ from pynote_core.storage import get_object_stream, upload_bytes
 
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024  # 30 MB — bump when we add presign
 PDF_CONTENT_TYPE = "application/pdf"
+
+# Upload MIME type -> Source.kind. The worker dispatches on `kind` (see
+# pynote_core.parsers.LOADERS), so every value here must have a registered
+# loader. Add a row + a loader together when introducing a new format.
+CONTENT_TYPE_TO_KIND: dict[str, str] = {
+    PDF_CONTENT_TYPE: "pdf",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "text/csv": "csv",
+}
+# Fallback extension -> kind, for browsers/clients that send a generic or empty
+# content type (Office files are frequently sent as application/octet-stream).
+EXTENSION_TO_KIND: dict[str, str] = {
+    ".pdf": "pdf",
+    ".pptx": "pptx",
+    ".xlsx": "xlsx",
+    ".csv": "csv",
+}
+# Default extension per kind — used to give S3/the object a sensible suffix and
+# the /file endpoint the right media type later.
+KIND_TO_CONTENT_TYPE: dict[str, str] = {v: k for k, v in CONTENT_TYPE_TO_KIND.items()}
+
+
+def _resolve_kind(content_type: str | None, filename: str | None) -> str | None:
+    """Map an upload's content type (or filename extension) to a Source.kind.
+
+    Content type wins; extension is the fallback for clients that send
+    octet-stream. Returns None when neither identifies a supported format.
+    """
+    if content_type and content_type in CONTENT_TYPE_TO_KIND:
+        return CONTENT_TYPE_TO_KIND[content_type]
+    if filename:
+        suffix = Path(filename).suffix.lower()
+        if suffix in EXTENSION_TO_KIND:
+            return EXTENSION_TO_KIND[suffix]
+    return None
 
 router = APIRouter(tags=["sources"])
 
@@ -92,10 +129,12 @@ async def upload_source(
     arq: ArqRedis = Depends(get_arq),
 ) -> Source:
     # Cheap validation first — fail before any DB or storage I/O.
-    if file.content_type != PDF_CONTENT_TYPE:
+    kind = _resolve_kind(file.content_type, file.filename)
+    if kind is None:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            f"Only {PDF_CONTENT_TYPE} accepted in M1 (got {file.content_type!r}).",
+            f"Unsupported file type {file.content_type!r}. "
+            f"Accepted: PDF, PowerPoint (.pptx), Excel (.xlsx), CSV.",
         )
     data = await file.read()
     if len(data) == 0:
@@ -114,14 +153,17 @@ async def upload_source(
     # into/out of an org. Solo notebooks land under `user/<id>/...`.
     scope = f"org/{notebook.org_id}" if notebook.org_id else f"user/{notebook.owner_user_id}"
     key = f"{scope}/notebook/{notebook_id}/source/{source_id}/{file.filename}"
-    bytes_uri = upload_bytes(key, data, content_type=PDF_CONTENT_TYPE)
+    # Store with the canonical content type for the resolved kind so the object
+    # is served correctly later; fall back to the client's type if unmapped.
+    store_content_type = KIND_TO_CONTENT_TYPE.get(kind, file.content_type or "application/octet-stream")
+    bytes_uri = upload_bytes(key, data, content_type=store_content_type)
 
     source = Source(
         id=source_id,
         notebook_id=notebook_id,
-        kind="pdf",
+        kind=kind,
         status="parsing",
-        title=file.filename or "untitled.pdf",
+        title=file.filename or f"untitled.{kind}",
         bytes_uri=bytes_uri,
         byte_size=len(data),
     )

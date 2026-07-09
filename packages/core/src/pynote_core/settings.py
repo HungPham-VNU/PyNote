@@ -82,6 +82,18 @@ class Settings(BaseSettings):
     # ---- Worker ----
     worker_concurrency: int = 4
 
+    # ---- CORS ----
+    # Comma-separated list of browser origins allowed to call the API. Dev
+    # default is the local Next.js server; in cloud deploy set this to the
+    # Vercel origin, e.g. CORS_ORIGINS="https://pynote.vercel.app". Multiple
+    # origins (preview + prod) can be comma-separated.
+    cors_origins: str = "http://localhost:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """Parsed `cors_origins` — trimmed, empty entries dropped."""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
