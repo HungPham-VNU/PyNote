@@ -26,7 +26,7 @@ from pynote_core.parsers.types import ParsedPart
 _NOTES_PREFIX = "[Speaker notes] "
 
 
-def _iter_shape_text(shapes) -> Iterator[str]:  # noqa: ANN001 - pptx shape collection
+def _iter_shape_text(shapes) -> Iterator[str]:
     """Yield text from each shape in a slide, flattening tables into rows.
 
     Shapes with a text frame contribute their text as-is. Table shapes are
@@ -52,7 +52,7 @@ def _iter_shape_text(shapes) -> Iterator[str]:  # noqa: ANN001 - pptx shape coll
                 yield text
 
 
-def _slide_title(slide, ordinal: int) -> str:  # noqa: ANN001 - pptx slide
+def _slide_title(slide, ordinal: int) -> str:
     """Best-effort slide title: the title placeholder, else a synthetic label.
 
     A stable non-empty title matters — it becomes the section heading, so even
@@ -66,7 +66,7 @@ def _slide_title(slide, ordinal: int) -> str:  # noqa: ANN001 - pptx slide
     return f"Slide {ordinal + 1}"
 
 
-def _notes_text(slide) -> str:  # noqa: ANN001 - pptx slide
+def _notes_text(slide) -> str:
     """Speaker-notes text for a slide, or '' when the slide has no notes."""
     if not slide.has_notes_slide:
         return ""

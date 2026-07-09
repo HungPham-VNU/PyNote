@@ -15,4 +15,10 @@ RUN uv pip install --system --no-cache \
       ./packages/core \
       ./apps/worker
 
-CMD ["arq", "pynote_worker.main.WorkerSettings"]
+# Bake BGE-small into the image so fastembed doesn't re-download ~130MB to an
+# ephemeral disk on every cold boot (DEPLOY.md §2.4/§4 landmine #6).
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
+
+# Run via `python -m pynote_worker` (not the arq CLI) so the entrypoint binds
+# the $PORT health server and the Windows-loop policy (DEPLOY.md §2.3).
+CMD ["python", "-m", "pynote_worker"]

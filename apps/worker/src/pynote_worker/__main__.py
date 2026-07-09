@@ -31,7 +31,7 @@ def _start_health_server() -> None:
     port = int(os.environ.get("PORT", "8080"))
 
     class _Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 - stdlib naming
+        def do_GET(self) -> None:
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
@@ -71,6 +71,9 @@ def main() -> None:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     _configure_logging()
+
+    # Bind the platform health port before the (blocking) worker loop starts.
+    _start_health_server()
 
     # Import arq *after* the policy is in place.
     from arq.worker import create_worker
